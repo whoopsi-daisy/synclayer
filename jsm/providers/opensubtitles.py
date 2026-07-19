@@ -36,7 +36,7 @@ USER_AGENT = f"synclayer-jsm v{__version__}"
 # https://www.opensubtitles.com/en/consumers and paste the key here; an
 # api_key in config.toml always overrides it. While this is empty, every
 # installation must set api_key in config.toml instead.
-DEFAULT_API_KEY = ""
+DEFAULT_API_KEY = "gUCLWGoAg2PmyseoTM0INFFVPcDCeDlT"
 
 # Rate-limit / transient-error handling.
 MAX_RETRIES = 3
