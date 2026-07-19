@@ -28,22 +28,27 @@ def test_accounts_parsing():
 
 def test_settings_defaults_and_load():
     settings = load_settings()
-    assert settings.languages == ["en"]
-    assert settings.sync_by_default is False
+    # Default template: English primary, Swedish secondary, full pipeline on.
+    assert settings.languages == ["en", "sv"]
+    assert settings.primary_language == "en"
+    assert settings.secondary_languages == ["sv"]
+    assert settings.sync_by_default is True
+    assert settings.clean_by_default is True
     assert settings.bulk_min_confidence == 0.99
 
     config_file().write_text(
-        'libraries = ["/media"]\nlanguages = ["de", "en"]\nsync_by_default = true\n'
+        'libraries = ["/media"]\nlanguages = ["de", "en"]\nsync_by_default = false\n'
         'unknown_key = 1\n'
     )
     settings = load_settings()
     assert settings.libraries == ["/media"]
     assert settings.languages == ["de", "en"]
-    assert settings.sync_by_default is True
+    assert settings.primary_language == "de"
+    assert settings.sync_by_default is False
 
 
 def test_settings_survive_broken_config():
     ensure_first_run_files()
     config_file().write_text("this is [not toml")
     settings = load_settings()
-    assert settings.languages == ["en"]
+    assert settings.languages == ["en", "sv"]

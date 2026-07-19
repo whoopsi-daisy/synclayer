@@ -108,14 +108,18 @@ class DashboardScreen(Screen):
         ]
         self.query_one("#dash-tools", Static).update("\n".join(tools))
 
+        langs = ", ".join(ctx.settings.languages) or "en"
         help_text = [
             "[b]Keys[/b]",
             "",
             "  [b]1[/b] dashboard   [b]2[/b] browser   [b]3[/b] queue",
-            "  [b]Space[/b] select   [b]D[/b] download+sync   [b]O[/b] download only",
-            "  [b]S[/b] sync   [b]V[/b] details   [b]M[/b] manual search",
-            "  [b]F/L/U/A[/b] filter missing/wrong-lang/unsynced/all",
+            "  [b]Space[/b] select   [b]D[/b] download (clean+sync)   "
+            f"[b]G[/b] get both langs ({langs})",
+            "  [b]O[/b] download only (no sync)   [b]S[/b] sync   [b]V[/b] details",
+            "  [b]M[/b] manual search   [b]F/L/U/A[/b] filter missing/wrong/unsynced/all",
             "  [b]B[/b] bulk download (typed confirmation)   [b]R[/b] rescan",
             "  [b]Ctrl+Q[/b] quit",
+            "",
+            f"  [dim]default per download: clean + sync · primary language {ctx.settings.primary_language}[/dim]",
         ]
         self.query_one("#dash-help", Static).update("\n".join(help_text))

@@ -105,9 +105,31 @@ First run creates `~/.config/jellyfin-subtitle-manager/`:
   languages = ["en"]        # ISO 639-1; output files use 639-2/B (eng, ...)
   api_key = ""              # optional
   sync_by_default = false   # run ffsubsync after every download
-  clean_by_default = false  # run subscleaner after every download
+  clean_by_default = true   # run subscleaner after every download
   bulk_min_confidence = 0.99
   ```
+
+### Languages: primary + secondary
+
+`languages` is a priority list. The **first** entry is your primary/default
+language — a normal download fetches just that. Extra entries are secondary
+languages, fetched only when you ask for **both** (the `G` key in the browser,
+or `--both` on the CLI).
+
+```toml
+languages = ["en"]         # English only
+languages = ["en", "sv"]   # English primary, Swedish secondary (default)
+```
+
+Downloaded files are Jellyfin-named per language: `Movie.eng.srt`, `Movie.swe.srt`.
+
+### What a download does (by default)
+
+Out of the box, downloading a subtitle runs the **full pipeline** —
+**download → rename (Jellyfin `Movie.eng.srt`) → clean (subscleaner) → sync
+(ffsubsync)**. Cleaning is skipped harmlessly if subscleaner isn't installed;
+same for sync/ffsubsync. Turn either off globally with `sync_by_default` /
+`clean_by_default`, or per-run on the CLI.
 
 ## Usage
 
@@ -123,8 +145,9 @@ jsm
 | arrows, `Enter` | navigate the folder tree |
 | `Space` | select/deselect a file (multi-select) |
 | `F` `L` `U` `A` | filter: missing / wrong language / unsynced / all |
-| `D` | **Download + Sync** for selection |
-| `O` | Download only |
+| `D` | **Download** primary language (clean + sync included) |
+| `G` | **Get both** — download every configured language |
+| `O` | Download only (skip sync) |
 | `S` | Sync an existing subtitle |
 | `M` | manual search (override title/year/language) |
 | `V` | file details (streams, subtitles, match info) |
@@ -140,11 +163,13 @@ jsm scan                          # scan configured libraries (live progress)
 jsm accounts                      # validate OpenSubtitles logins + show quota
 jsm doctor                        # check environment and configuration
 jsm missing --format csv -o report.csv
-jsm download /media/new-movies --sync --clean
+jsm download /media/new-movies    # primary language, clean + sync by default
+jsm download /media/movies --both # every configured language (en + sv)
+jsm download -l sv /media/movies  # a specific language (or -l en,sv)
 jsm download --all --dry-run      # preview a bulk run, writes nothing
 jsm sync  /media/movies/Alien.mkv # ffsubsync existing subtitles
 jsm clean /media/movies --dry-run # subscleaner ad/spam removal
-jsm maintain --yes                # scan → report → download missing
+jsm maintain --both --yes         # scan → report → download missing (all langs)
 ```
 
 ## Safety model

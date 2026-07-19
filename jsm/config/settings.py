@@ -36,8 +36,13 @@ CONFIG_TEMPLATE = """\
 # Root folders of your media libraries, e.g. ["/media", "/media2"]
 libraries = []
 
-# Subtitle languages you want, in priority order (ISO 639-1 codes).
-languages = ["en"]
+# Subtitle languages you want, in priority order (ISO 639-1 codes). The FIRST
+# entry is your primary/default language - it is what a normal download fetches.
+# Add more for secondary languages; they are only fetched when you ask for
+# "both" (the 'G' key in the browser, or --both on the CLI).
+#   languages = ["en"]        # English only
+#   languages = ["en", "sv"]  # English primary, Swedish secondary
+languages = ["en", "sv"]
 
 # OpenSubtitles authentication uses the username/password logins in
 # accounts.conf by default - that is all you need. An application API key is
@@ -45,13 +50,13 @@ languages = ["en"]
 # https://www.opensubtitles.com/en/consumers
 api_key = ""
 
-# Run ffsubsync after every download by default. Off by default because it is
-# CPU intensive; the interactive workflow lets you choose per action anyway.
-sync_by_default = false
+# Run ffsubsync on every download by default (download -> clean -> sync).
+sync_by_default = true
 
 # Run subscleaner on each downloaded subtitle to strip ads/spam lines.
-# Off by default; requires the 'subscleaner' command (pip install subscleaner).
-clean_by_default = false
+# Requires the 'subscleaner' command (pip install subscleaner); if it is not
+# installed this is skipped harmlessly.
+clean_by_default = true
 
 # Minimum match confidence for bulk ("download all") operations. 0.99 means
 # hash matches only.
@@ -65,11 +70,19 @@ queue_concurrency = 1
 @dataclass
 class Settings:
     libraries: list[str] = field(default_factory=list)
-    languages: list[str] = field(default_factory=lambda: ["en"])
+    languages: list[str] = field(default_factory=lambda: ["en", "sv"])
     api_key: str = ""
-    sync_by_default: bool = False
-    clean_by_default: bool = False
+    sync_by_default: bool = True
+    clean_by_default: bool = True
     bulk_min_confidence: float = 0.99
+
+    @property
+    def primary_language(self) -> str:
+        return self.languages[0] if self.languages else "en"
+
+    @property
+    def secondary_languages(self) -> list[str]:
+        return self.languages[1:]
     queue_concurrency: int = 1
 
     @property

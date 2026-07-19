@@ -45,7 +45,10 @@ def _parser() -> argparse.ArgumentParser:
     download.add_argument("paths", nargs="*", help="files or folders to fetch subtitles for")
     download.add_argument("--all", action="store_true",
                           help="all files with missing subtitles in the library")
-    download.add_argument("--language", "-l", help="subtitle language (default: first configured)")
+    download.add_argument("--language", "-l",
+                          help="language(s) to fetch, comma-separated (default: primary)")
+    download.add_argument("--both", action="store_true",
+                          help="fetch every configured language, not just the primary")
     download.add_argument("--sync", action="store_true", help="run ffsubsync after downloading")
     download.add_argument("--clean", action="store_true",
                           help="run subscleaner on each downloaded subtitle")
@@ -67,6 +70,8 @@ def _parser() -> argparse.ArgumentParser:
     maintain = sub.add_parser("maintain", help="full cycle: scan, download missing, optional sync")
     maintain.add_argument("--sync", action="store_true", help="also synchronize downloads")
     maintain.add_argument("--clean", action="store_true", help="also clean downloaded subtitles")
+    maintain.add_argument("--both", action="store_true",
+                          help="fetch every configured language, not just the primary")
     maintain.add_argument("--dry-run", action="store_true")
     maintain.add_argument("--min-confidence", type=float, default=None)
     maintain.add_argument("--yes", action="store_true",
@@ -185,7 +190,7 @@ def _confirm_bulk(count: int, assume_yes: bool, dry_run: bool) -> bool:
 async def _run_downloads(
     ctx: AppContext,
     media: list[Media],
-    language: str,
+    languages: list[str],
     sync: bool,
     dry_run: bool,
     min_confidence: float,
@@ -193,24 +198,27 @@ async def _run_downloads(
     failures = 0
     if dry_run:
         for m in media:
-            try:
-                outcome = await ctx.downloader.download_for(
-                    m, language, min_confidence=min_confidence, dry_run=True
-                )
-            except Exception as exc:
-                print(f"err {m.filename}: {exc}")
-                failures += 1
-                continue
-            print(("ok " if outcome.success else "-- ") + f"{m.filename}: {outcome.message}")
-            failures += 0 if outcome.success else 1
+            for language in languages:
+                try:
+                    outcome = await ctx.downloader.download_for(
+                        m, language, min_confidence=min_confidence, dry_run=True
+                    )
+                except Exception as exc:
+                    print(f"err {m.filename} [{language}]: {exc}")
+                    failures += 1
+                    continue
+                tag = f"{m.filename} [{language}]"
+                print(("ok " if outcome.success else "-- ") + f"{tag}: {outcome.message}")
+                failures += 0 if outcome.success else 1
         return failures
 
     action = JobAction.DOWNLOAD_SYNC if sync else JobAction.DOWNLOAD
     job_ids = set()
     for m in media:
         assert m.id is not None
-        job = ctx.worker.enqueue(m.id, action, language, min_confidence=min_confidence)
-        job_ids.add(job.id)
+        for language in languages:
+            job = ctx.worker.enqueue(m.id, action, language, min_confidence=min_confidence)
+            job_ids.add(job.id)
     await ctx.worker.run_until_empty()
     for job in ctx.db.jobs():
         if job.id not in job_ids:
@@ -230,7 +238,25 @@ async def _run_downloads(
 def _language(ctx: AppContext, override: str | None) -> str:
     if override:
         return override
-    return ctx.settings.languages[0] if ctx.settings.languages else "en"
+    return ctx.settings.primary_language
+
+
+def _languages(ctx: AppContext, override: str | None, both: bool) -> list[str]:
+    """Languages to fetch: an explicit --language (comma-separated) wins;
+    otherwise --both means every configured language, and the default is just
+    the primary."""
+    if override:
+        raw = [x.strip() for x in override.split(",") if x.strip()]
+    elif both:
+        raw = list(ctx.settings.languages)
+    else:
+        raw = [ctx.settings.primary_language]
+    out: list[str] = []
+    for lang in raw:
+        norm = normalize_language(lang) or lang
+        if norm not in out:
+            out.append(norm)
+    return out or ["en"]
 
 
 async def _in_one_loop(ctx: AppContext, coro) -> object:
@@ -249,7 +275,7 @@ def cmd_download(ctx: AppContext, args: argparse.Namespace) -> int:
     if not args.all and not args.paths:
         print("Give paths or use --all.", file=sys.stderr)
         return 2
-    language = _language(ctx, args.language)
+    languages = _languages(ctx, args.language, args.both)
     if args.all:
         _scan_paths(ctx, [])
         media = ctx.db.all_media(status=MediaStatus.MISSING)
@@ -270,7 +296,7 @@ def cmd_download(ctx: AppContext, args: argparse.Namespace) -> int:
     if args.clean or ctx.settings.clean_by_default:
         ctx.worker.clean_downloads = True
     failures = asyncio.run(_in_one_loop(
-        ctx, _run_downloads(ctx, media, language, sync, args.dry_run, min_confidence)
+        ctx, _run_downloads(ctx, media, languages, sync, args.dry_run, min_confidence)
     ))
     return 1 if failures else 0
 
@@ -390,8 +416,9 @@ def cmd_maintain(ctx: AppContext, args: argparse.Namespace) -> int:
     sync = args.sync or ctx.settings.sync_by_default
     if args.clean or ctx.settings.clean_by_default:
         ctx.worker.clean_downloads = True
+    languages = _languages(ctx, None, args.both)
     failures = asyncio.run(_in_one_loop(
-        ctx, _run_downloads(ctx, media, _language(ctx, None), sync, args.dry_run, min_confidence)
+        ctx, _run_downloads(ctx, media, languages, sync, args.dry_run, min_confidence)
     ))
     return 1 if failures else 0
 

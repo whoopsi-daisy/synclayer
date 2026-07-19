@@ -80,8 +80,9 @@ class BrowserScreen(Screen):
         Binding("l", "filter('wrong language')", "Wrong lang"),
         Binding("u", "filter('unsynced')", "Unsynced"),
         Binding("a", "filter('all')", "All"),
-        Binding("d", "download_sync", "Download+Sync"),
-        Binding("o", "download_only", "Download"),
+        Binding("d", "download_sync", "Download"),
+        Binding("g", "download_all_langs", "Get both langs"),
+        Binding("o", "download_only", "Download (no sync)"),
         Binding("s", "sync", "Sync"),
         Binding("m", "manual_search", "Manual", show=False),
         Binding("v", "details", "Details"),
@@ -293,27 +294,39 @@ class BrowserScreen(Screen):
 
     @property
     def _language(self) -> str:
-        languages = self.app.ctx.settings.languages
-        return languages[0] if languages else "en"
+        return self.app.ctx.settings.primary_language
 
-    def _enqueue(self, action: str, targets: list[Media]) -> None:
+    @property
+    def _all_languages(self) -> list[str]:
+        langs = self.app.ctx.settings.languages
+        return list(langs) if langs else ["en"]
+
+    def _enqueue(self, action: str, targets: list[Media],
+                 languages: list[str] | None = None) -> None:
         if not targets:
             self.notify("Nothing selected", severity="warning")
             return
+        langs = languages or [self._language]
         for media in targets:
             assert media.id is not None
-            self.app.ctx.worker.enqueue(media.id, action, self._language)
+            for language in langs:
+                self.app.ctx.worker.enqueue(media.id, action, language)
         verb = {
             JobAction.DOWNLOAD: "download",
-            JobAction.DOWNLOAD_SYNC: "download+sync",
+            JobAction.DOWNLOAD_SYNC: "download",
             JobAction.SYNC: "sync",
         }[JobAction(action)]
-        self.notify(f"Queued {verb} for {len(targets)} file(s)")
+        lang_note = f" [{', '.join(langs)}]" if len(langs) > 1 else ""
+        self.notify(f"Queued {verb}{lang_note} for {len(targets)} file(s)")
         self.selected.clear()
         self.refresh_table()
 
     def action_download_sync(self) -> None:
         self._enqueue(JobAction.DOWNLOAD_SYNC, self._target_media())
+
+    def action_download_all_langs(self) -> None:
+        self._enqueue(JobAction.DOWNLOAD_SYNC, self._target_media(),
+                      languages=self._all_languages)
 
     def action_download_only(self) -> None:
         self._enqueue(JobAction.DOWNLOAD, self._target_media())
