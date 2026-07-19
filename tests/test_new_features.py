@@ -45,11 +45,19 @@ async def test_download_writes_jellyfin_filename(db, scanner, tmp_path, fake_pro
 
 # --- #1 auth needs username/password accounts AND an API key ----------------
 
-async def test_provider_not_configured_without_api_key(db):
+async def test_provider_needs_api_key(db, monkeypatch):
     # The OpenSubtitles REST API rejects every request without an Api-Key
-    # header, so accounts alone are not enough.
+    # header, so accounts alone are not enough. With no built-in key and none
+    # in config, the provider is not configured...
+    monkeypatch.setattr("jsm.providers.opensubtitles.DEFAULT_API_KEY", "")
     provider = OpenSubtitlesProvider("", AccountManager(db, [("u", "p")]))
     assert provider.configured is False
+    # ...but the shipped built-in application key makes it work (users only
+    # supply username/password, like the official Jellyfin plugin).
+    monkeypatch.setattr("jsm.providers.opensubtitles.DEFAULT_API_KEY", "app-key")
+    provider = OpenSubtitlesProvider("", AccountManager(db, [("u", "p")]))
+    assert provider.configured is True
+    assert provider.uses_default_key is True
 
 
 async def test_provider_not_configured_without_accounts(db):
