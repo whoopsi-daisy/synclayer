@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS queue (
     language TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued',
     priority INTEGER NOT NULL DEFAULT 0,
+    min_confidence REAL NOT NULL DEFAULT 0,
     error_message TEXT,
     detail TEXT,
     created TEXT NOT NULL,
@@ -289,12 +290,20 @@ class Database:
         return QueueJob(
             id=row["id"], media_id=row["media_id"], action=row["action"],
             language=row["language"], status=row["status"], priority=row["priority"],
+            min_confidence=row["min_confidence"],
             error_message=row["error_message"], detail=row["detail"],
             created=row["created"], updated=row["updated"],
             media_path=row["media_path"] if "media_path" in keys else None,
         )
 
-    def enqueue(self, media_id: int, action: str, language: str, priority: int = 0) -> QueueJob:
+    def enqueue(
+        self,
+        media_id: int,
+        action: str,
+        language: str,
+        priority: int = 0,
+        min_confidence: float = 0.0,
+    ) -> QueueJob:
         # Avoid duplicate active jobs for the same file+action+language.
         placeholders = ",".join("?" for _ in ACTIVE_JOB_STATUSES)
         row = self.conn.execute(
@@ -309,9 +318,10 @@ class Database:
         now = _now()
         cur = self.conn.execute(
             """INSERT INTO queue (media_id, action, language, status, priority,
-                                  created, updated)
-               VALUES (?,?,?,?,?,?,?)""",
-            (media_id, action, language, JobStatus.QUEUED, priority, now, now),
+                                  min_confidence, created, updated)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (media_id, action, language, JobStatus.QUEUED, priority,
+             min_confidence, now, now),
         )
         self.conn.commit()
         return self.get_job(cur.lastrowid)  # type: ignore[return-value]

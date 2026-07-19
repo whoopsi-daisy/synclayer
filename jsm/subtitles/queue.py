@@ -41,8 +41,15 @@ class QueueWorker:
 
     # ------------------------------------------------------------- job control
 
-    def enqueue(self, media_id: int, action: str, language: str, priority: int = 0) -> QueueJob:
-        job = self.db.enqueue(media_id, action, language, priority)
+    def enqueue(
+        self,
+        media_id: int,
+        action: str,
+        language: str,
+        priority: int = 0,
+        min_confidence: float = 0.0,
+    ) -> QueueJob:
+        job = self.db.enqueue(media_id, action, language, priority, min_confidence)
         self._notify(job)
         self._wakeup.set()
         return job
@@ -127,7 +134,9 @@ class QueueWorker:
         try:
             if job.action in (JobAction.DOWNLOAD, JobAction.DOWNLOAD_SYNC):
                 self._update(job, status=JobStatus.SEARCHING, detail="Searching…")
-                outcome = await self.downloader.download_for(media, job.language)
+                outcome = await self.downloader.download_for(
+                    media, job.language, min_confidence=job.min_confidence
+                )
                 if not outcome.success:
                     self._update(job, status=JobStatus.FAILED, error_message=outcome.message)
                     return

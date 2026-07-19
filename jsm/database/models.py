@@ -83,6 +83,7 @@ class QueueJob:
     language: str
     status: str = JobStatus.QUEUED
     priority: int = 0
+    min_confidence: float = 0.0
     error_message: str | None = None
     detail: str | None = None       # human-readable progress note
     created: str | None = None

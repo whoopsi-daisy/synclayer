@@ -1,0 +1,76 @@
+#browser-left {
+    width: 32;
+    min-width: 24;
+    border-right: solid $primary-darken-2;
+}
+
+#library-tree {
+    height: 1fr;
+    padding: 1;
+}
+
+#browser-right {
+    width: 1fr;
+}
+
+#browser-status, #queue-status {
+    height: auto;
+    padding: 0 1;
+    background: $surface;
+    color: $text-muted;
+}
+
+#media-table, #queue-table {
+    height: 1fr;
+}
+
+.dialog {
+    width: 64;
+    max-width: 90%;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    background: $panel;
+    border: thick $primary;
+    align: center middle;
+}
+
+BulkConfirmDialog, ManualSearchDialog, DetailsScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#details-panel {
+    width: 90;
+}
+
+.dialog-buttons {
+    height: auto;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+.dialog-buttons Button {
+    margin-left: 2;
+}
+
+.dialog Input {
+    margin-bottom: 1;
+}
+
+#bulk-title {
+    margin-bottom: 1;
+}
+
+#dashboard-grid {
+    grid-size: 2;
+    grid-gutter: 1 2;
+    padding: 1 2;
+    height: auto;
+}
+
+.dash-panel {
+    padding: 1 2;
+    border: round $primary-darken-2;
+    height: auto;
+}
