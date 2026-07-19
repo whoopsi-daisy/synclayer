@@ -103,9 +103,11 @@ class DashboardScreen(Screen):
                        "ffsubsync missing - sync actions disabled"),
             "  " + mark(subscleaner_available(), "subscleaner available",
                        "subscleaner missing - cleanup disabled"),
-            "  " + mark(bool(ctx.settings.api_key),
-                       "API key set",
-                       "api_key missing from config.toml - REQUIRED "
+            "  " + mark(ctx.provider.has_api_key,
+                       "API key available"
+                       + (" (built-in)" if ctx.provider.uses_default_key
+                          else " (config.toml)"),
+                       "no API key - set api_key in config.toml "
                        "(free at opensubtitles.com/en/consumers)"),
         ]
         self.query_one("#dash-tools", Static).update("\n".join(tools))

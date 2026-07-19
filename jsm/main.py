@@ -290,10 +290,13 @@ def cmd_doctor(ctx: AppContext) -> int:
                     "no accounts in accounts.conf - downloads will fail "
                     "(add 'username;password' lines)",
                     fatal=True)
-    healthy &= line(bool(ctx.settings.api_key),
-                    "OpenSubtitles API key set",
-                    "no api_key in config.toml - REQUIRED by the OpenSubtitles "
-                    "API (free at https://www.opensubtitles.com/en/consumers)",
+    healthy &= line(ctx.provider.has_api_key,
+                    "OpenSubtitles API key available "
+                    + ("(built-in application key)"
+                       if ctx.provider.uses_default_key else "(from config.toml)"),
+                    "no API key - the OpenSubtitles API requires one and this "
+                    "build has no built-in key; set api_key in config.toml "
+                    "(free at https://www.opensubtitles.com/en/consumers)",
                     fatal=True)
     line(ffprobe_available(), "ffprobe found (media analysis enabled)",
          "ffprobe not found - install ffmpeg for duration/embedded-subtitle "
@@ -551,10 +554,11 @@ def cmd_accounts(ctx: AppContext) -> int:
         print("No accounts configured. Add 'username;password' lines to "
               f"{config.accounts_file()}", file=sys.stderr)
         return 2
-    if not ctx.settings.api_key:
-        print("No OpenSubtitles API key configured - every login will fail.\n"
+    if not ctx.provider.has_api_key:
+        print("No OpenSubtitles API key available - every login will fail.\n"
               "The OpenSubtitles REST API requires an API key for ALL requests "
-              "(username/password alone is not enough).\n"
+              "(username/password alone is not enough), and this build ships "
+              "without a built-in application key.\n"
               "Create a free key at https://www.opensubtitles.com/en/consumers "
               f"and set api_key in {config.config_file()}", file=sys.stderr)
         return 2

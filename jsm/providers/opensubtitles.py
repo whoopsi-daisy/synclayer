@@ -29,6 +29,15 @@ from jsm.subtitles.language import normalize_language
 BASE_URL = "https://api.opensubtitles.com/api/v1"
 USER_AGENT = f"synclayer-jsm v{__version__}"
 
+# Application-level API key, the way the official Jellyfin plugin ships one
+# (see jellyfin-plugin-opensubtitles PR #76): OpenSubtitles wants the key to
+# identify the *application*, while users only supply username/password.
+# To enable this, register a consumer named e.g. 'synclayer' under
+# https://www.opensubtitles.com/en/consumers and paste the key here; an
+# api_key in config.toml always overrides it. While this is empty, every
+# installation must set api_key in config.toml instead.
+DEFAULT_API_KEY = ""
+
 # Rate-limit / transient-error handling.
 MAX_RETRIES = 3
 DEFAULT_BACKOFF = 2.0  # seconds; doubled each retry
@@ -69,7 +78,9 @@ class OpenSubtitlesProvider(SubtitleProvider):
         client: httpx.AsyncClient | None = None,
         base_url: str = BASE_URL,
     ):
-        self.api_key = api_key
+        # A user-supplied key (config.toml) beats the application's built-in
+        # default; end users normally never need their own.
+        self.api_key = api_key or DEFAULT_API_KEY
         self.accounts = accounts
         self.base_url = base_url
         self._client = client
@@ -93,6 +104,10 @@ class OpenSubtitlesProvider(SubtitleProvider):
     @property
     def has_api_key(self) -> bool:
         return bool(self.api_key)
+
+    @property
+    def uses_default_key(self) -> bool:
+        return bool(DEFAULT_API_KEY) and self.api_key == DEFAULT_API_KEY
 
     def _headers(self, token: str | None = None) -> dict[str, str]:
         headers = {
@@ -127,9 +142,10 @@ class OpenSubtitlesProvider(SubtitleProvider):
         header - fail fast with instructions instead of a confusing 403."""
         if not self.api_key:
             raise NotConfiguredError(
-                "No OpenSubtitles API key configured. The OpenSubtitles REST "
+                "No OpenSubtitles API key available. The OpenSubtitles REST "
                 "API requires one for ALL requests (username/password alone "
-                "is not enough). Create a free key under 'API consumers' at "
+                "is not enough), and this build ships without a built-in "
+                "application key. Create a free key under 'API consumers' at "
                 "https://www.opensubtitles.com/en/consumers and set api_key "
                 "in config.toml."
             )

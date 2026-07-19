@@ -26,8 +26,9 @@ ACCOUNTS_TEMPLATE = """\
 # accounts and jsm automatically rotates to whichever has the most remaining
 # quota. Lines starting with '#' and blank lines are ignored.
 #
-# NOTE: you also need an API key in config.toml - the OpenSubtitles API
-# requires one for every request (free at opensubtitles.com/en/consumers).
+# NOTE: the OpenSubtitles API also needs an application API key. If this
+# build of jsm ships without a built-in one, set api_key in config.toml
+# (free at opensubtitles.com/en/consumers) - 'jsm doctor' will tell you.
 #
 # Example:
 #   myuser;mypassword
@@ -47,9 +48,11 @@ libraries = []
 #   languages = ["en", "sv"]  # English primary, Swedish secondary
 languages = ["en", "sv"]
 
-# OpenSubtitles API key - REQUIRED. The OpenSubtitles REST API rejects every
-# request (HTTP 403) without one, even with valid username/password accounts
-# in accounts.conf. Keys are free: log in at opensubtitles.com, open
+# OpenSubtitles API key. The OpenSubtitles REST API rejects every request
+# (HTTP 403) without one, even with valid username/password accounts in
+# accounts.conf. Leave empty to use the application's built-in key if this
+# build ships one (like the official Jellyfin plugin does); otherwise a key
+# is REQUIRED here. Keys are free: log in at opensubtitles.com, open
 # https://www.opensubtitles.com/en/consumers and create an "API consumer",
 # then paste the key here.
 api_key = ""
