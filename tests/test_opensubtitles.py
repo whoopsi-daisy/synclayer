@@ -59,6 +59,45 @@ async def test_missing_api_key_is_clear_error(db):
         await provider.download(candidate)
 
 
+async def test_builtin_default_api_key_used_when_config_empty(db, monkeypatch):
+    # Like the official Jellyfin plugin: the app can ship its own key so end
+    # users only ever supply username/password.
+    monkeypatch.setattr("jsm.providers.opensubtitles.DEFAULT_API_KEY", "app-key")
+    seen = {}
+
+    def handler(request):
+        seen.setdefault("api_key", request.headers.get("Api-Key"))
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "t"})
+        return httpx.Response(200, json=SEARCH_RESPONSE)
+
+    transport = httpx.MockTransport(handler)
+    provider = OpenSubtitlesProvider(
+        "", AccountManager(db, [("alice", "pw")]),
+        client=httpx.AsyncClient(transport=transport),
+    )
+    assert provider.configured is True
+    assert provider.uses_default_key is True
+    await provider.search(["en"], query="x")
+    assert seen["api_key"] == "app-key"
+
+
+async def test_config_api_key_overrides_builtin_default(db, monkeypatch):
+    monkeypatch.setattr("jsm.providers.opensubtitles.DEFAULT_API_KEY", "app-key")
+    seen = {}
+
+    def handler(request):
+        seen.setdefault("api_key", request.headers.get("Api-Key"))
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "t"})
+        return httpx.Response(200, json=SEARCH_RESPONSE)
+
+    provider, _ = make_provider(db, handler)  # api_key="test-key" from config
+    assert provider.uses_default_key is False
+    await provider.search(["en"], query="x")
+    assert seen["api_key"] == "test-key"
+
+
 async def test_jwt_pasted_as_api_key_is_clear_error(db):
     provider, _ = make_provider(db, lambda r: httpx.Response(200))
     provider.api_key = "ey" + "x" * 150  # a JWT, not an API key

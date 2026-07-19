@@ -28,10 +28,11 @@ Think *Radarr/Sonarr, but for subtitles — with you in the driver's seat.*
   choose *Download+Sync* or *Download only* per action, or flip the global
   default.
 - **Username/password login** — authentication uses the accounts in
-  `accounts.conf` plus a free OpenSubtitles API key in `config.toml` (the
-  OpenSubtitles REST API requires the key on every request). Multiple accounts
-  rotate automatically (20 downloads per rolling 24 h each), and jobs park
-  until quota refreshes when all are spent. `jsm accounts` validates them.
+  `accounts.conf` plus an application API key (built into the app when the
+  build ships one, or `api_key` in `config.toml` — the OpenSubtitles REST
+  API requires a key on every request). Multiple accounts rotate
+  automatically (20 downloads per rolling 24 h each), and jobs park until
+  quota refreshes when all are spent. `jsm accounts` validates them.
 - **Jellyfin-native filenames** — downloaded subtitles are named from the
   local video basename plus the ISO 639-2/B language code
   (`Movie.mp4 → Movie.eng.srt`). Provider filenames are never used.
@@ -98,10 +99,14 @@ First run creates `~/.config/jellyfin-subtitle-manager/`:
   them with `jsm accounts`.
 
 - **`config.toml`** — library roots, wanted languages, and the OpenSubtitles
-  **API key, which is required**: the OpenSubtitles REST API rejects every
-  request (HTTP 403) without one, even with valid accounts. Keys are free —
-  log in at opensubtitles.com and create an "API consumer" at
-  <https://www.opensubtitles.com/en/consumers>:
+  API key. The OpenSubtitles REST API rejects every request (HTTP 403)
+  without an application key — this is why tools like the official Jellyfin
+  plugin embed one in their code while users only type username/password.
+  Builds of jsm that ship a built-in key work the same way and need nothing
+  here; otherwise create a free "API consumer" key at
+  <https://www.opensubtitles.com/en/consumers> (either paste it into
+  `api_key`, or — if you distribute jsm to others — into `DEFAULT_API_KEY`
+  in `jsm/providers/opensubtitles.py` so your users never see it):
 
   ```toml
   libraries = ["/media", "/media2"]
