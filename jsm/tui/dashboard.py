@@ -119,8 +119,12 @@ class DashboardScreen(Screen):
             f"[b]G[/b] get both langs ({langs})",
             "  [b]O[/b] download only (no sync)   [b]S[/b] sync   [b]V[/b] details",
             "  [b]M[/b] manual search   [b]F/L/U/A[/b] filter missing/wrong/unsynced/all",
+            "  [b]H[/b] hide files that already have subtitles",
             "  [b]B[/b] bulk download (typed confirmation)   [b]R[/b] rescan",
             "  [b]Ctrl+Q[/b] quit",
+            "",
+            "  [dim]Queued work runs in the background - the status bar shows",
+            "  running/failed counts and a summary pops up when a batch ends.[/dim]",
             "",
             f"  [dim]default per download: clean + sync · primary language {ctx.settings.primary_language}[/dim]",
         ]

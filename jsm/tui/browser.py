@@ -80,6 +80,7 @@ class BrowserScreen(Screen):
         Binding("l", "filter('wrong language')", "Wrong lang"),
         Binding("u", "filter('unsynced')", "Unsynced"),
         Binding("a", "filter('all')", "All"),
+        Binding("h", "toggle_hide_ok", "Hide done"),
         Binding("d", "download_sync", "Download"),
         Binding("g", "download_all_langs", "Get both langs"),
         Binding("o", "download_only", "Download (no sync)"),
@@ -94,6 +95,8 @@ class BrowserScreen(Screen):
         super().__init__()
         self.current_dir: str | None = None
         self.filter_name = "all"
+        # Declutter toggle: drop rows that already have a healthy subtitle.
+        self.hide_ok = False
         self.selected: set[int] = set()
         self._media_cache: dict[int, Media] = {}
 
@@ -146,6 +149,8 @@ class BrowserScreen(Screen):
         status = FILTERS[self.filter_name]
         if status:
             media = [m for m in media if m.status == status]
+        if self.hide_ok:
+            media = [m for m in media if m.status != MediaStatus.OK]
         return media
 
     def _subtitle_summary(self, media: Media, subs=None) -> str:
@@ -208,13 +213,30 @@ class BrowserScreen(Screen):
         parts = [
             f"[b]{escape(self.current_dir)}[/b]",
             f"{n} file(s)",
-            f"filter: [b]{self.filter_name}[/b]",
+            f"filter: [b]{self.filter_name}[/b]"
+            + (" [dim](hiding ✓ OK - press H to show)[/dim]" if self.hide_ok else ""),
         ]
         if self.selected:
             parts.append(f"[reverse] {len(self.selected)} selected [/reverse]")
+        parts.extend(self._job_summary())
         if extra:
             parts.append(extra)
         self.query_one("#browser-status", Static).update("  •  ".join(parts))
+
+    def _job_summary(self) -> list[str]:
+        """Live queue counters so running/failed work is visible from the
+        browser without switching to the queue screen."""
+        from jsm.database.models import ACTIVE_JOB_STATUSES, JobStatus
+
+        jobs = self.app.ctx.db.jobs()
+        active = sum(1 for j in jobs if j.status in ACTIVE_JOB_STATUSES)
+        failed = sum(1 for j in jobs if j.status == JobStatus.FAILED)
+        parts = []
+        if active:
+            parts.append(f"[yellow]⏳ {active} job(s) running[/yellow]")
+        if failed:
+            parts.append(f"[red]✗ {failed} failed - press 3 for details[/red]")
+        return parts
 
     # -------------------------------------------------------------- scanning
 
@@ -290,6 +312,13 @@ class BrowserScreen(Screen):
         self.filter_name = name
         self.refresh_table()
 
+    def action_toggle_hide_ok(self) -> None:
+        self.hide_ok = not self.hide_ok
+        self.refresh_table()
+        if self.hide_ok:
+            self.notify("Hiding files that already have subtitles (H to undo)",
+                        timeout=4)
+
     # ---------------------------------------------------------------- actions
 
     @property
@@ -317,7 +346,11 @@ class BrowserScreen(Screen):
             JobAction.SYNC: "sync",
         }[JobAction(action)]
         lang_note = f" [{', '.join(langs)}]" if len(langs) > 1 else ""
-        self.notify(f"Queued {verb}{lang_note} for {len(targets)} file(s)")
+        self.notify(
+            f"▶ Queued {verb}{lang_note} for {len(targets)} file(s) - "
+            "running in the background; a summary appears when done",
+            timeout=5,
+        )
         self.selected.clear()
         self.refresh_table()
 
@@ -442,6 +475,7 @@ class BrowserScreen(Screen):
     # ------------------------------------------------------------ job updates
 
     def on_job_updated(self, event: JobUpdated) -> None:
+        self._update_status_bar()
         media_id = event.job.media_id
         if media_id in self._media_cache:
             refreshed = self.app.ctx.db.get_media(media_id)

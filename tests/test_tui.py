@@ -82,6 +82,45 @@ async def test_queue_screen_shows_jobs(app, media_tree):
         assert table.row_count == 1
 
 
+async def test_failed_job_shows_results_dialog(app, media_tree):
+    """Failures must be surfaced in a modal, not silently swallowed."""
+    from jsm.providers.opensubtitles import OpenSubtitlesError
+    from jsm.tui.dialogs import JobResultsDialog
+
+    app.ctx.provider.fail = OpenSubtitlesError("server exploded")
+    app.ctx.downloader.provider = app.ctx.provider
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause(0.5)
+        app.screen.open_directory(str(media_tree / "new-movies"))
+        await pilot.pause(0.8)
+        await pilot.press("f", "space", "o")
+        await wait_for_queue(app, pilot)
+        await pilot.pause(0.5)
+        assert isinstance(app.screen, JobResultsDialog)
+        rows = app.screen.query(".result-row")
+        assert any("server exploded" in str(r.render()) for r in rows)
+        await pilot.press("escape")
+        await pilot.pause(0.3)
+        assert isinstance(app.screen, BrowserScreen)
+
+
+async def test_hide_ok_toggle_declutters(app, media_tree):
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause(0.5)
+        browser = app.screen
+        browser.open_directory(str(media_tree / "new-movies"))
+        await pilot.pause(0.8)
+        table = browser.query_one("#media-table", DataTable)
+        assert table.row_count == 3  # Alien (OK), Winnie (missing), DuckTales (wrong)
+        await pilot.press("h")
+        await pilot.pause(0.2)
+        assert table.row_count == 2  # Alien hidden
+        assert browser.hide_ok is True
+        await pilot.press("h")
+        await pilot.pause(0.2)
+        assert table.row_count == 3
+
+
 async def test_bulk_dialog_requires_typed_phrase(app, media_tree):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause(0.5)

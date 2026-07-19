@@ -120,6 +120,37 @@ async def test_sync_job_without_ffsubsync_fails_cleanly(db, media_tree, worker, 
     assert (media_tree / "new-movies" / "Alien (1979).en.srt").read_bytes() == SRT
 
 
+async def test_sync_picks_up_manually_added_subtitle(db, media_tree, worker, monkeypatch):
+    """A subtitle dropped next to the movie AFTER the last scan must be found
+    by a sync job (the DB alone would not know about it)."""
+    synced = {}
+
+    async def fake_sync(media_path, subtitle_path):
+        synced["target"] = str(subtitle_path)
+        return True, "Synced"
+
+    monkeypatch.setattr("jsm.subtitles.queue.synchronizer.synchronize", fake_sync)
+    # Winnie has no subtitle at scan time; the user downloads one manually.
+    manual = media_tree / "new-movies" / "Winnie The Pooh (2011).en.srt"
+    manual.write_bytes(SRT)
+    media = next(m for m in db.all_media() if "Winnie" in m.filename)
+    assert not [s for s in db.subtitles_for(media.id) if s.path]  # DB is stale
+    worker.enqueue(media.id, JobAction.SYNC, "en")
+    await worker.run_until_empty()
+    job = db.jobs()[0]
+    assert job.status == JobStatus.COMPLETED, job.error_message
+    assert synced["target"] == str(manual)
+
+
+async def test_sync_with_no_subtitle_anywhere_fails_helpfully(db, worker):
+    media = next(m for m in db.all_media() if "Winnie" in m.filename)
+    worker.enqueue(media.id, JobAction.SYNC, "en")
+    await worker.run_until_empty()
+    job = db.jobs()[0]
+    assert job.status == JobStatus.FAILED
+    assert "download one first" in job.error_message
+
+
 async def test_dry_run_writes_nothing(db, media_tree, scanner, fake_provider):
     scanner.scan(media_tree)
     downloader = Downloader(db, fake_provider, scanner, Settings())
