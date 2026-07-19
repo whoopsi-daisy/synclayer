@@ -159,16 +159,20 @@ class QueueWorker:
                     await self._sync_file(job, media.path, outcome.subtitle_path)
                 self._update(job, status=JobStatus.COMPLETED)
             elif job.action == JobAction.SYNC:
-                target = self._sync_target(job)
+                target = self._sync_target(job, media)
                 if target is None:
                     self._update(
                         job, status=JobStatus.FAILED,
-                        error_message=f"No external '{job.language}' subtitle to sync",
+                        error_message=(
+                            f"No external '{job.language}' subtitle file found "
+                            f"next to {media.filename} - download one first, or "
+                            "name it like the video (Movie.en.srt)"
+                        ),
                     )
                     return
                 await self._sync_file(job, media.path, target, fail_job=True)
             elif job.action == JobAction.CLEAN:
-                target = self._sync_target(job)
+                target = self._sync_target(job, media)
                 if target is None:
                     self._update(
                         job, status=JobStatus.FAILED,
@@ -193,7 +197,15 @@ class QueueWorker:
         except Exception as exc:  # never let one bad job kill the worker
             self._update(job, status=JobStatus.FAILED, error_message=f"{type(exc).__name__}: {exc}")
 
-    def _sync_target(self, job: QueueJob) -> str | None:
+    def _sync_target(self, job: QueueJob, media=None) -> str | None:
+        # The database only knows what the last scan saw. A subtitle the user
+        # just dropped next to the movie (the whole point of a manual sync)
+        # would be missed - re-scan the file first so it is picked up.
+        if media is not None:
+            try:
+                self.downloader.scanner.rescan_media(media)
+            except OSError:
+                pass  # unreadable now; fall back to whatever the DB has
         subs = self.db.subtitles_for(job.media_id)
         candidates = [
             s for s in subs

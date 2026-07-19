@@ -103,8 +103,10 @@ class DashboardScreen(Screen):
                        "ffsubsync missing - sync actions disabled"),
             "  " + mark(subscleaner_available(), "subscleaner available",
                        "subscleaner missing - cleanup disabled"),
-            ("  [green]✓[/green] API key set (optional)" if ctx.settings.api_key
-             else "  [dim]· API key not set (optional)[/dim]"),
+            "  " + mark(bool(ctx.settings.api_key),
+                       "API key set",
+                       "api_key missing from config.toml - REQUIRED "
+                       "(free at opensubtitles.com/en/consumers)"),
         ]
         self.query_one("#dash-tools", Static).update("\n".join(tools))
 
@@ -117,8 +119,12 @@ class DashboardScreen(Screen):
             f"[b]G[/b] get both langs ({langs})",
             "  [b]O[/b] download only (no sync)   [b]S[/b] sync   [b]V[/b] details",
             "  [b]M[/b] manual search   [b]F/L/U/A[/b] filter missing/wrong/unsynced/all",
+            "  [b]H[/b] hide files that already have subtitles",
             "  [b]B[/b] bulk download (typed confirmation)   [b]R[/b] rescan",
             "  [b]Ctrl+Q[/b] quit",
+            "",
+            "  [dim]Queued work runs in the background - the status bar shows",
+            "  running/failed counts and a summary pops up when a batch ends.[/dim]",
             "",
             f"  [dim]default per download: clean + sync · primary language {ctx.settings.primary_language}[/dim]",
         ]

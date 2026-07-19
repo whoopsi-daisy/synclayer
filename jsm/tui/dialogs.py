@@ -1,13 +1,17 @@
-"""Modal dialogs: bulk confirmation and manual search."""
+"""Modal dialogs: bulk confirmation, manual search, job results."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
+from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, Label, RadioButton, RadioSet
+from textual.widgets import Button, Checkbox, Input, Label, RadioButton, RadioSet, Static
+
+from jsm.database.models import JobStatus, QueueJob
 
 BULK_CONFIRM_PHRASE = "DOWNLOAD ALL"
 
@@ -85,6 +89,65 @@ class BulkConfirmDialog(ModalScreen[BulkChoice | None]):
                 dry_run=self.query_one("#bulk-dry", Checkbox).value,
             )
         )
+
+
+_RESULT_ICONS = {
+    JobStatus.COMPLETED: ("✓", "green"),
+    JobStatus.FAILED: ("✗", "red"),
+    JobStatus.WAITING_QUOTA: ("⏳", "magenta"),
+    JobStatus.PAUSED: ("⏸", "dim"),
+}
+
+
+class JobResultsDialog(ModalScreen[None]):
+    """Shown when a batch of queued jobs has finished: every job's outcome,
+    failures first, so errors are never silently swallowed."""
+
+    BINDINGS = [
+        ("escape", "dismiss(None)", "Close"),
+        ("enter", "dismiss(None)", "Close"),
+    ]
+
+    def __init__(self, jobs: list[QueueJob]):
+        super().__init__()
+        # Failures first - they are what the user must not miss.
+        order = {JobStatus.FAILED: 0, JobStatus.WAITING_QUOTA: 1,
+                 JobStatus.PAUSED: 2, JobStatus.COMPLETED: 3}
+        self.jobs = sorted(jobs, key=lambda j: order.get(JobStatus(j.status), 9))
+
+    def compose(self) -> ComposeResult:
+        done = sum(1 for j in self.jobs if j.status == JobStatus.COMPLETED)
+        failed = sum(1 for j in self.jobs if j.status == JobStatus.FAILED)
+        parked = sum(1 for j in self.jobs if j.status == JobStatus.WAITING_QUOTA)
+        bits = [f"{done} succeeded"]
+        if failed:
+            bits.append(f"[red]{failed} failed[/red]")
+        if parked:
+            bits.append(f"[magenta]{parked} waiting for quota[/magenta]")
+        with Vertical(classes="dialog", id="results-dialog"):
+            yield Label(
+                f"[b]Finished:[/b] {', '.join(bits)}", id="results-title"
+            )
+            with VerticalScroll(id="results-list"):
+                for job in self.jobs:
+                    icon, style = _RESULT_ICONS.get(
+                        JobStatus(job.status), ("·", "")
+                    )
+                    info = (job.error_message if job.status == JobStatus.FAILED
+                            else job.detail) or job.status
+                    # Text() renders literally - filenames and errors often
+                    # contain brackets that must not be parsed as markup.
+                    line = Text()
+                    line.append(f"{icon} ", style=style)
+                    line.append(Path(job.media_path or "?").name)
+                    line.append(f"  [{job.language}]  ", style="dim")
+                    line.append(str(info), style=style if style else "dim")
+                    yield Static(line, classes="result-row")
+            with Horizontal(classes="dialog-buttons"):
+                yield Button("Close", variant="primary", id="results-close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
 
 
 @dataclass

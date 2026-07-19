@@ -35,9 +35,27 @@
     align: center middle;
 }
 
-BulkConfirmDialog, ManualSearchDialog, DetailsScreen {
+BulkConfirmDialog, ManualSearchDialog, DetailsScreen, JobResultsDialog {
     align: center middle;
     background: $background 60%;
+}
+
+#results-dialog {
+    width: 90;
+}
+
+#results-list {
+    height: auto;
+    max-height: 20;
+    margin-top: 1;
+}
+
+.result-row {
+    height: auto;
+}
+
+#results-title {
+    margin-bottom: 1;
 }
 
 #details-panel {

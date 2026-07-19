@@ -28,7 +28,8 @@ Think *Radarr/Sonarr, but for subtitles — with you in the driver's seat.*
   choose *Download+Sync* or *Download only* per action, or flip the global
   default.
 - **Username/password login** — authentication uses the accounts in
-  `accounts.conf`; an OpenSubtitles API key is *optional*. Multiple accounts
+  `accounts.conf` plus a free OpenSubtitles API key in `config.toml` (the
+  OpenSubtitles REST API requires the key on every request). Multiple accounts
   rotate automatically (20 downloads per rolling 24 h each), and jobs park
   until quota refreshes when all are spent. `jsm accounts` validates them.
 - **Jellyfin-native filenames** — downloaded subtitles are named from the
@@ -96,14 +97,16 @@ First run creates `~/.config/jellyfin-subtitle-manager/`:
   Add several accounts and jsm rotates between them automatically. Validate
   them with `jsm accounts`.
 
-- **`config.toml`** — library roots, wanted languages, and optional settings.
-  The OpenSubtitles **API key is optional** — set it only if your account
-  requires one (free at <https://www.opensubtitles.com/en/consumers>):
+- **`config.toml`** — library roots, wanted languages, and the OpenSubtitles
+  **API key, which is required**: the OpenSubtitles REST API rejects every
+  request (HTTP 403) without one, even with valid accounts. Keys are free —
+  log in at opensubtitles.com and create an "API consumer" at
+  <https://www.opensubtitles.com/en/consumers>:
 
   ```toml
   libraries = ["/media", "/media2"]
   languages = ["en"]        # ISO 639-1; output files use 639-2/B (eng, ...)
-  api_key = ""              # optional
+  api_key = "YOUR_KEY"      # required - free at opensubtitles.com/en/consumers
   sync_by_default = false   # run ffsubsync after every download
   clean_by_default = true   # run subscleaner after every download
   bulk_min_confidence = 0.99

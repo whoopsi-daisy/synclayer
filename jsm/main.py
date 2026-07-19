@@ -28,57 +28,235 @@ BULK_CONFIRM_PHRASE = "DOWNLOAD ALL"
 
 
 def _parser() -> argparse.ArgumentParser:
+    fmt = argparse.RawDescriptionHelpFormatter
     parser = argparse.ArgumentParser(
-        prog="jsm", description="Synclayer - Jellyfin Subtitle Maintenance Manager"
+        prog="jsm",
+        formatter_class=fmt,
+        description=(
+            "Synclayer - Jellyfin Subtitle Maintenance Manager.\n\n"
+            "Run 'jsm' with no arguments for the interactive TUI (file browser,\n"
+            "download queue, dashboard). The subcommands below cover scripting\n"
+            "and automation. Every download follows the same pipeline:\n"
+            "search -> download -> Jellyfin rename (Movie.eng.srt) -> clean -> sync\n"
+            "(clean/sync steps are controlled by config.toml and per-run flags)."
+        ),
+        epilog=(
+            "quick start:\n"
+            "  jsm doctor                        check config, accounts and tools\n"
+            "  jsm scan                          index your libraries (with progress)\n"
+            "  jsm missing                       see what needs attention\n"
+            "  jsm download /media/movies        fetch subtitles for a folder\n"
+            "\n"
+            "configuration lives in ~/.config/jellyfin-subtitle-manager/\n"
+            "(config.toml: libraries, languages, REQUIRED OpenSubtitles api_key;\n"
+            " accounts.conf: one 'username;password' per line).\n"
+            "\n"
+            "Use 'jsm <command> --help' for details and examples of each command."
+        ),
     )
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(
+        dest="command", title="commands", metavar="<command>"
+    )
 
-    scan = sub.add_parser("scan", help="scan libraries and update the database")
-    scan.add_argument("paths", nargs="*", help="folders to scan (default: configured libraries)")
+    scan = sub.add_parser(
+        "scan",
+        help="index media files into the database (fast when re-run)",
+        formatter_class=fmt,
+        description=(
+            "Walk the given folders (default: the libraries in config.toml),\n"
+            "find video files (.mkv .mp4 .avi .webm), detect their subtitles\n"
+            "(external files and embedded streams via ffprobe), and record\n"
+            "everything in the local database with a health status per file:\n"
+            "OK / missing / wrong language / unsynced.\n\n"
+            "Progress is shown as processed/total with the current file. The\n"
+            "first scan probes every file and can take a while on large\n"
+            "libraries; re-scans skip unchanged files and are much faster.\n"
+            "Media files are only ever read, never modified."
+        ),
+        epilog=(
+            "examples:\n"
+            "  jsm scan                          scan all configured libraries\n"
+            "  jsm scan /media/movies            scan one folder (recursively)"
+        ),
+    )
+    scan.add_argument("paths", nargs="*", metavar="PATH",
+                      help="folders to scan (default: the configured libraries)")
 
-    missing = sub.add_parser("missing", help="report missing/wrong-language/unsynced subtitles")
-    missing.add_argument("--format", choices=["text", "csv", "json"], default="text")
-    missing.add_argument("--output", "-o", help="write the report to a file")
-    missing.add_argument("--rescan", action="store_true", help="scan before reporting")
+    missing = sub.add_parser(
+        "missing",
+        help="report files whose subtitles need attention",
+        formatter_class=fmt,
+        description=(
+            "List every scanned file that is missing a wanted-language\n"
+            "subtitle, has only wrong-language subtitles, or whose subtitle\n"
+            "is flagged unsynced. Reads the database - run 'jsm scan' (or use\n"
+            "--rescan) first for fresh results."
+        ),
+        epilog=(
+            "examples:\n"
+            "  jsm missing                       human-readable table\n"
+            "  jsm missing --rescan              scan first, then report\n"
+            "  jsm missing --format csv -o report.csv"
+        ),
+    )
+    missing.add_argument("--format", choices=["text", "csv", "json"], default="text",
+                         help="output format (default: text)")
+    missing.add_argument("--output", "-o", metavar="FILE",
+                         help="write the report to FILE instead of stdout")
+    missing.add_argument("--rescan", action="store_true",
+                         help="re-scan the libraries before reporting")
 
-    download = sub.add_parser("download", help="download subtitles")
-    download.add_argument("paths", nargs="*", help="files or folders to fetch subtitles for")
+    download = sub.add_parser(
+        "download",
+        help="search and download subtitles for files or folders",
+        formatter_class=fmt,
+        description=(
+            "Find the best OpenSubtitles match for each file and download it.\n"
+            "Matching uses the file's moviehash first (~99%% confidence), then\n"
+            "filename similarity (title/year/release group). The subtitle is\n"
+            "saved next to the video as Movie.eng.srt (Jellyfin naming);\n"
+            "existing files are never overwritten (Movie.eng.2.srt instead).\n\n"
+            "By default the configured cleanup (subscleaner) and sync\n"
+            "(ffsubsync) steps run per config.toml. Downloads consume the\n"
+            "OpenSubtitles per-account quota (20/day, accounts rotate\n"
+            "automatically; jobs park and resume when quota refreshes).\n\n"
+            "Bulk mode (--all) targets every file with missing subtitles and\n"
+            "asks you to type '%s' unless --yes or --dry-run is given."
+            % BULK_CONFIRM_PHRASE
+        ),
+        epilog=(
+            "examples:\n"
+            "  jsm download /media/movies             primary language, full pipeline\n"
+            "  jsm download --both /media/movies      every configured language\n"
+            "  jsm download -l sv /media/movies       a specific language\n"
+            "  jsm download Movie.mkv --sync          force ffsubsync afterwards\n"
+            "  jsm download --all --dry-run           preview a bulk run (writes nothing)\n"
+            "  jsm download --all --yes --min-confidence 0.99"
+        ),
+    )
+    download.add_argument("paths", nargs="*", metavar="PATH",
+                          help="media files or folders to fetch subtitles for")
     download.add_argument("--all", action="store_true",
-                          help="all files with missing subtitles in the library")
-    download.add_argument("--language", "-l",
-                          help="language(s) to fetch, comma-separated (default: primary)")
+                          help="target every library file with missing subtitles")
+    download.add_argument("--language", "-l", metavar="LANGS",
+                          help="language(s) to fetch, comma-separated ISO codes "
+                               "(default: primary configured language)")
     download.add_argument("--both", action="store_true",
                           help="fetch every configured language, not just the primary")
-    download.add_argument("--sync", action="store_true", help="run ffsubsync after downloading")
+    download.add_argument("--sync", action="store_true",
+                          help="run ffsubsync on each download (even if "
+                               "sync_by_default is off)")
     download.add_argument("--clean", action="store_true",
-                          help="run subscleaner on each downloaded subtitle")
-    download.add_argument("--dry-run", action="store_true", help="preview without downloading")
-    download.add_argument("--min-confidence", type=float, default=None,
-                          help="minimum match confidence 0..1 (bulk default from config)")
+                          help="run subscleaner on each download (even if "
+                               "clean_by_default is off)")
+    download.add_argument("--dry-run", action="store_true",
+                          help="show what would be downloaded; write nothing")
+    download.add_argument("--min-confidence", type=float, default=None, metavar="X",
+                          help="reject matches below confidence X (0..1; 0.99 = "
+                               "hash matches only; bulk default from config)")
     download.add_argument("--yes", action="store_true",
                           help=f"skip the typed '{BULK_CONFIRM_PHRASE}' bulk confirmation")
 
-    sync = sub.add_parser("sync", help="synchronize existing subtitles with ffsubsync")
-    sync.add_argument("paths", nargs="+", help="media files or folders")
-    sync.add_argument("--language", "-l", help="subtitle language (default: first configured)")
+    sync = sub.add_parser(
+        "sync",
+        help="re-time existing subtitles against the video (ffsubsync)",
+        formatter_class=fmt,
+        description=(
+            "Run ffsubsync on the existing subtitle of each given file or\n"
+            "folder, aligning its timing to the audio track. The original\n"
+            "subtitle is kept as .bak; the file is only replaced when\n"
+            "ffsubsync succeeds. Files are re-scanned first, so a subtitle\n"
+            "you just added by hand is picked up. Requires ffsubsync\n"
+            "(pip install 'jellyfin-subtitle-manager[sync]')."
+        ),
+        epilog=(
+            "examples:\n"
+            "  jsm sync /media/movies/Alien.mkv\n"
+            "  jsm sync -l sv /media/movies"
+        ),
+    )
+    sync.add_argument("paths", nargs="+", metavar="PATH",
+                      help="media files or folders whose subtitles to synchronize")
+    sync.add_argument("--language", "-l", metavar="LANG",
+                      help="subtitle language to sync (default: primary configured)")
 
-    clean = sub.add_parser("clean", help="clean ads/spam from existing subtitles (subscleaner)")
-    clean.add_argument("paths", nargs="+", help="media files or folders")
-    clean.add_argument("--language", "-l", help="subtitle language (default: first configured)")
-    clean.add_argument("--dry-run", action="store_true", help="list what would be cleaned")
+    clean = sub.add_parser(
+        "clean",
+        help="strip ads/spam from existing subtitles (subscleaner)",
+        formatter_class=fmt,
+        description=(
+            "Run subscleaner on the existing subtitles of the given files or\n"
+            "folders, removing advertisement and spam lines. A .bak of the\n"
+            "original is kept. Requires subscleaner (pip install subscleaner)."
+        ),
+        epilog=(
+            "examples:\n"
+            "  jsm clean /media/movies --dry-run      list what would be cleaned\n"
+            "  jsm clean /media/movies/Alien.mkv"
+        ),
+    )
+    clean.add_argument("paths", nargs="+", metavar="PATH",
+                       help="media files or folders whose subtitles to clean")
+    clean.add_argument("--language", "-l", metavar="LANG",
+                       help="subtitle language to clean (default: primary configured)")
+    clean.add_argument("--dry-run", action="store_true",
+                       help="list the files that would be cleaned; change nothing")
 
-    maintain = sub.add_parser("maintain", help="full cycle: scan, download missing, optional sync")
-    maintain.add_argument("--sync", action="store_true", help="also synchronize downloads")
-    maintain.add_argument("--clean", action="store_true", help="also clean downloaded subtitles")
+    maintain = sub.add_parser(
+        "maintain",
+        help="one-shot cycle: scan, report, download all missing",
+        formatter_class=fmt,
+        description=(
+            "The unattended maintenance cycle, equivalent to:\n"
+            "  jsm scan && jsm missing && jsm download --all\n"
+            "Scans the configured libraries, prints the missing-subtitles\n"
+            "report, then queues downloads for every file that lacks one.\n"
+            "Suitable for cron with --yes (and --dry-run to rehearse)."
+        ),
+        epilog=(
+            "examples:\n"
+            "  jsm maintain --dry-run            rehearse without downloading\n"
+            "  jsm maintain --both --yes         cron-friendly, all languages"
+        ),
+    )
+    maintain.add_argument("--sync", action="store_true",
+                          help="run ffsubsync on each download (even if "
+                               "sync_by_default is off)")
+    maintain.add_argument("--clean", action="store_true",
+                          help="run subscleaner on each download (even if "
+                               "clean_by_default is off)")
     maintain.add_argument("--both", action="store_true",
                           help="fetch every configured language, not just the primary")
-    maintain.add_argument("--dry-run", action="store_true")
-    maintain.add_argument("--min-confidence", type=float, default=None)
+    maintain.add_argument("--dry-run", action="store_true",
+                          help="show what would be downloaded; write nothing")
+    maintain.add_argument("--min-confidence", type=float, default=None, metavar="X",
+                          help="reject matches below confidence X (0..1; "
+                               "default: bulk_min_confidence from config)")
     maintain.add_argument("--yes", action="store_true",
                           help=f"skip the typed '{BULK_CONFIRM_PHRASE}' confirmation")
 
-    sub.add_parser("accounts", help="validate OpenSubtitles accounts and show quota")
-    sub.add_parser("doctor", help="check the environment and configuration")
+    sub.add_parser(
+        "accounts",
+        help="verify OpenSubtitles logins and show remaining quota",
+        formatter_class=fmt,
+        description=(
+            "Log in with every account from accounts.conf and report whether\n"
+            "the credentials (and the API key from config.toml) work, plus\n"
+            "how many of each account's 20 daily downloads remain.\n"
+            "Exit status: 0 all good, 1 some account failed, 2 not configured."
+        ),
+    )
+    sub.add_parser(
+        "doctor",
+        help="check configuration, accounts and optional tools",
+        formatter_class=fmt,
+        description=(
+            "Print a health check of everything jsm needs: config file and\n"
+            "library paths, accounts.conf, the required OpenSubtitles API\n"
+            "key, and the optional tools (ffprobe, ffsubsync, subscleaner).\n"
+            "Exit status is non-zero when a fatal problem was found."
+        ),
+    )
     return parser
 
 
@@ -112,9 +290,11 @@ def cmd_doctor(ctx: AppContext) -> int:
                     "no accounts in accounts.conf - downloads will fail "
                     "(add 'username;password' lines)",
                     fatal=True)
-    line(bool(ctx.settings.api_key),
-         "OpenSubtitles API key set (optional)",
-         "no api_key set - optional, only needed if your account requires one")
+    healthy &= line(bool(ctx.settings.api_key),
+                    "OpenSubtitles API key set",
+                    "no api_key in config.toml - REQUIRED by the OpenSubtitles "
+                    "API (free at https://www.opensubtitles.com/en/consumers)",
+                    fatal=True)
     line(ffprobe_available(), "ffprobe found (media analysis enabled)",
          "ffprobe not found - install ffmpeg for duration/embedded-subtitle "
          "detection (optional)")
@@ -134,29 +314,50 @@ def cmd_doctor(ctx: AppContext) -> int:
 
 
 def _scan_paths(ctx: AppContext, paths: list[str]) -> None:
+    import shutil
+    import time
+
     roots = [Path(p) for p in paths] if paths else ctx.settings.library_paths
     if not roots:
         print("No libraries configured and no paths given. "
               f"Edit {config.config_file()} first.", file=sys.stderr)
         raise SystemExit(2)
-    # Live per-directory counter, refreshed in place on a TTY.
+    # Live progress, refreshed in place on a TTY; periodic lines otherwise.
     live = sys.stdout.isatty()
+    state = {"last": 0.0, "milestone": 0}
 
-    def on_progress(stats, directory) -> None:
+    def on_progress(stats, path) -> None:
+        done = stats.processed
         if live:
+            now = time.monotonic()
+            # Repainting the line for every file wastes more time than the
+            # scan itself on fast disks - cap redraws at ~10/s.
+            if now - state["last"] < 0.1 and done != stats.total:
+                return
+            state["last"] = now
+            width = shutil.get_terminal_size().columns
+            pct = f" ({done / stats.total:.0%})" if stats.total else ""
+            head = f"  [{done}/{stats.total}]{pct} {stats.remaining} left  "
+            name = stats.current[: max(10, width - len(head) - 2)]
             # \033[K clears to end of line so shorter updates don't leave debris.
-            print(f"\r  scanned {stats.scanned} file(s) in {stats.directories} "
-                  f"folder(s)…\033[K", end="", flush=True)
+            print(f"\r{head}{name}\033[K", end="", flush=True)
+        elif done >= state["milestone"]:
+            state["milestone"] = done + 500
+            print(f"  {done}/{stats.total} file(s) scanned…", flush=True)
 
     for root in roots:
         print(f"Scanning {root} …")
+        started = time.monotonic()
         stats = ctx.scanner.scan(root, recursive=True, on_progress=on_progress)
         if live:
             print("\r\033[K", end="")
         for warning in stats.warnings:
             print(f"  warning: {warning}", file=sys.stderr)
+        elapsed = time.monotonic() - started
+        skipped = f", {stats.skipped} skipped" if stats.skipped else ""
         print(f"  {stats.scanned} file(s) in {stats.directories} folder(s) "
-              f"({stats.added} new, {stats.changed} changed, {stats.removed} removed)")
+              f"({stats.added} new, {stats.changed} changed, "
+              f"{stats.removed} removed{skipped}) in {elapsed:.1f}s")
 
 
 def _collect_media(ctx: AppContext, paths: list[str], status: str | None = None) -> list[Media]:
@@ -350,9 +551,14 @@ def cmd_accounts(ctx: AppContext) -> int:
         print("No accounts configured. Add 'username;password' lines to "
               f"{config.accounts_file()}", file=sys.stderr)
         return 2
+    if not ctx.settings.api_key:
+        print("No OpenSubtitles API key configured - every login will fail.\n"
+              "The OpenSubtitles REST API requires an API key for ALL requests "
+              "(username/password alone is not enough).\n"
+              "Create a free key at https://www.opensubtitles.com/en/consumers "
+              f"and set api_key in {config.config_file()}", file=sys.stderr)
+        return 2
     print(f"Checking {len(usernames)} OpenSubtitles account(s)...")
-    if ctx.settings.api_key:
-        print("  (API key is set and will be sent as well)")
 
     async def check() -> int:
         bad = 0
@@ -434,34 +640,42 @@ def main(argv: list[str] | None = None) -> int:
 
     ctx = AppContext()
     try:
-        if args.command == "scan":
-            _scan_paths(ctx, args.paths)
-            return 0
-        if args.command == "missing":
-            if args.rescan:
-                _scan_paths(ctx, [])
-            report = format_report(missing_report(ctx.db), args.format)
-            if args.output:
-                Path(args.output).write_text(report, encoding="utf-8")
-                print(f"Report written to {args.output}")
-            else:
-                print(report, end="")
-            return 0
-        if args.command == "doctor":
-            return cmd_doctor(ctx)
-        if args.command == "accounts":
-            return cmd_accounts(ctx)
-        if args.command == "download":
-            return cmd_download(ctx, args)
-        if args.command == "sync":
-            return cmd_sync(ctx, args)
-        if args.command == "clean":
-            return cmd_clean(ctx, args)
-        if args.command == "maintain":
-            return cmd_maintain(ctx, args)
-        return 2
+        try:
+            return _dispatch(ctx, args)
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            return 130
     finally:
         asyncio.run(ctx.close())
+
+
+def _dispatch(ctx: AppContext, args: argparse.Namespace) -> int:
+    if args.command == "scan":
+        _scan_paths(ctx, args.paths)
+        return 0
+    if args.command == "missing":
+        if args.rescan:
+            _scan_paths(ctx, [])
+        report = format_report(missing_report(ctx.db), args.format)
+        if args.output:
+            Path(args.output).write_text(report, encoding="utf-8")
+            print(f"Report written to {args.output}")
+        else:
+            print(report, end="")
+        return 0
+    if args.command == "doctor":
+        return cmd_doctor(ctx)
+    if args.command == "accounts":
+        return cmd_accounts(ctx)
+    if args.command == "download":
+        return cmd_download(ctx, args)
+    if args.command == "sync":
+        return cmd_sync(ctx, args)
+    if args.command == "clean":
+        return cmd_clean(ctx, args)
+    if args.command == "maintain":
+        return cmd_maintain(ctx, args)
+    return 2
 
 
 if __name__ == "__main__":
