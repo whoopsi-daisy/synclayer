@@ -26,6 +26,9 @@ ACCOUNTS_TEMPLATE = """\
 # accounts and jsm automatically rotates to whichever has the most remaining
 # quota. Lines starting with '#' and blank lines are ignored.
 #
+# NOTE: you also need an API key in config.toml - the OpenSubtitles API
+# requires one for every request (free at opensubtitles.com/en/consumers).
+#
 # Example:
 #   myuser;mypassword
 """
@@ -44,10 +47,11 @@ libraries = []
 #   languages = ["en", "sv"]  # English primary, Swedish secondary
 languages = ["en", "sv"]
 
-# OpenSubtitles authentication uses the username/password logins in
-# accounts.conf by default - that is all you need. An application API key is
-# OPTIONAL: set it here only if your account requires one. Get one free at
-# https://www.opensubtitles.com/en/consumers
+# OpenSubtitles API key - REQUIRED. The OpenSubtitles REST API rejects every
+# request (HTTP 403) without one, even with valid username/password accounts
+# in accounts.conf. Keys are free: log in at opensubtitles.com, open
+# https://www.opensubtitles.com/en/consumers and create an "API consumer",
+# then paste the key here.
 api_key = ""
 
 # Run ffsubsync on every download by default (download -> clean -> sync).

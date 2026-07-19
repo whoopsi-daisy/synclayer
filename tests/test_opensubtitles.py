@@ -39,30 +39,49 @@ def make_provider(db, handler, accounts=None):
     return OpenSubtitlesProvider("test-key", mgr, client=client), mgr
 
 
-async def test_requires_accounts_not_api_key(db):
-    # Username/password is the primary auth: no accounts -> not configured,
-    # even though a search would otherwise not need an API key.
+async def test_requires_accounts(db):
     provider, _ = make_provider(db, lambda r: httpx.Response(200), accounts=[])
     with pytest.raises(NotConfiguredError, match="accounts.conf"):
         await provider.search(["en"], query="x")
 
 
-async def test_search_works_without_api_key(db):
+async def test_missing_api_key_is_clear_error(db):
+    # The OpenSubtitles REST API requires the Api-Key header on every request
+    # (a missing key means HTTP 403 for all logins) - fail fast with
+    # instructions instead of letting the server reject us confusingly.
+    provider, _ = make_provider(db, lambda r: httpx.Response(200))
+    provider.api_key = ""
+    with pytest.raises(NotConfiguredError, match="consumers"):
+        await provider.search(["en"], query="x")
+    candidate = SubtitleCandidate(provider="opensubtitles", file_id="1",
+                                  language="en", release_name="x")
+    with pytest.raises(NotConfiguredError, match="api_key"):
+        await provider.download(candidate)
+
+
+async def test_jwt_pasted_as_api_key_is_clear_error(db):
+    provider, _ = make_provider(db, lambda r: httpx.Response(200))
+    provider.api_key = "ey" + "x" * 150  # a JWT, not an API key
+    with pytest.raises(NotConfiguredError, match="JWT"):
+        await provider.search(["en"], query="x")
+
+
+async def test_search_sends_api_key_and_token(db):
     seen = {}
 
     def handler(request):
         if request.url.path.endswith("/login"):
+            seen["login_api_key"] = request.headers.get("Api-Key")
             return httpx.Response(200, json={"token": "session-token"})
         seen["params"] = dict(request.url.params)
         seen["api_key"] = request.headers.get("Api-Key")
         seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json=SEARCH_RESPONSE)
 
-    # No API key configured - login-based auth must still work.
     provider, _ = make_provider(db, handler)
-    provider.api_key = ""
     results = await provider.search(["en"], moviehash="abc123", query="Inception", year=2010)
-    assert seen["api_key"] is None          # no key sent when not configured
+    assert seen["login_api_key"] == "test-key"  # key sent on /login too
+    assert seen["api_key"] == "test-key"
     assert seen["auth"] == "Bearer session-token"
     assert seen["params"]["moviehash"] == "abc123"
     assert seen["params"]["query"] == "Inception"
@@ -70,6 +89,70 @@ async def test_search_works_without_api_key(db):
     assert results[0].file_id == "111"
     assert results[0].moviehash_match is True
     assert results[0].downloads == 1234
+
+
+async def test_login_403_explains_api_key_rejection(db):
+    def handler(request):
+        return httpx.Response(403, json={"message": "You cannot consume this service"})
+
+    provider, _ = make_provider(db, handler)
+    ok, message = await provider.validate_account("alice")
+    assert ok is False
+    assert "API key" in message
+    assert "You cannot consume this service" in message
+
+
+async def test_login_401_is_bad_credentials(db):
+    def handler(request):
+        return httpx.Response(401, json={"message": "Unauthorized"})
+
+    provider, _ = make_provider(db, handler)
+    ok, message = await provider.validate_account("alice")
+    assert ok is False
+    assert message == "invalid credentials"
+
+
+async def test_vip_base_url_from_login_is_used(db):
+    hosts = []
+
+    def handler(request):
+        hosts.append(request.url.host)
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, json={
+                "token": "t", "base_url": "vip-api.opensubtitles.com",
+            })
+        if request.url.path.endswith("/download"):
+            return httpx.Response(200, json={"link": "https://files.test/s.srt"})
+        if request.url.path.endswith("/subtitles"):
+            return httpx.Response(200, json=SEARCH_RESPONSE)
+        return httpx.Response(200, content=b"data")
+
+    provider, _ = make_provider(db, handler)
+    await provider.search(["en"], query="x")
+    candidate = SubtitleCandidate(provider="opensubtitles", file_id="1",
+                                  language="en", release_name="x")
+    await provider.download(candidate)
+    assert "vip-api.opensubtitles.com" in hosts  # post-login calls moved over
+
+
+async def test_search_retries_once_on_expired_token(db):
+    state = {"searches": 0, "logins": 0}
+
+    def handler(request):
+        if request.url.path.endswith("/login"):
+            state["logins"] += 1
+            return httpx.Response(200, json={"token": f"t{state['logins']}"})
+        state["searches"] += 1
+        if state["searches"] == 1:
+            return httpx.Response(401)
+        assert request.headers["Authorization"] == "Bearer t1"
+        return httpx.Response(200, json=SEARCH_RESPONSE)
+
+    provider, _ = make_provider(db, handler)
+    provider._tokens["alice"] = "stale"
+    results = await provider.search(["en"], query="x")
+    assert len(results) == 1
+    assert state["logins"] == 1
 
 
 async def test_api_key_sent_when_configured(db):

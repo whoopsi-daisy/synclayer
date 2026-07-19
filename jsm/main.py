@@ -112,9 +112,11 @@ def cmd_doctor(ctx: AppContext) -> int:
                     "no accounts in accounts.conf - downloads will fail "
                     "(add 'username;password' lines)",
                     fatal=True)
-    line(bool(ctx.settings.api_key),
-         "OpenSubtitles API key set (optional)",
-         "no api_key set - optional, only needed if your account requires one")
+    healthy &= line(bool(ctx.settings.api_key),
+                    "OpenSubtitles API key set",
+                    "no api_key in config.toml - REQUIRED by the OpenSubtitles "
+                    "API (free at https://www.opensubtitles.com/en/consumers)",
+                    fatal=True)
     line(ffprobe_available(), "ffprobe found (media analysis enabled)",
          "ffprobe not found - install ffmpeg for duration/embedded-subtitle "
          "detection (optional)")
@@ -371,9 +373,14 @@ def cmd_accounts(ctx: AppContext) -> int:
         print("No accounts configured. Add 'username;password' lines to "
               f"{config.accounts_file()}", file=sys.stderr)
         return 2
+    if not ctx.settings.api_key:
+        print("No OpenSubtitles API key configured - every login will fail.\n"
+              "The OpenSubtitles REST API requires an API key for ALL requests "
+              "(username/password alone is not enough).\n"
+              "Create a free key at https://www.opensubtitles.com/en/consumers "
+              f"and set api_key in {config.config_file()}", file=sys.stderr)
+        return 2
     print(f"Checking {len(usernames)} OpenSubtitles account(s)...")
-    if ctx.settings.api_key:
-        print("  (API key is set and will be sent as well)")
 
     async def check() -> int:
         bad = 0

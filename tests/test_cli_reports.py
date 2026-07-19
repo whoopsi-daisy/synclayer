@@ -72,9 +72,9 @@ def test_bulk_dry_run_needs_no_confirmation(media_tree, capsys, monkeypatch):
         raise AssertionError("dry-run must not prompt")
 
     monkeypatch.setattr("builtins.input", boom)
-    # dry-run searches via the real provider which has no API key -> it reports
-    # the failure per file but exits without writing anything
+    # dry-run searches via the real provider which has no accounts/API key ->
+    # it reports the failure per file but exits without writing anything
     rc = cli.main(["download", "--all", "--dry-run"])
     out = capsys.readouterr().out
     assert rc == 1
-    assert "API key" in out
+    assert "accounts.conf" in out

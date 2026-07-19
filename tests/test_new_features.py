@@ -43,11 +43,13 @@ async def test_download_writes_jellyfin_filename(db, scanner, tmp_path, fake_pro
     assert "en" in langs
 
 
-# --- #1 username/password is the auth; API key optional ---------------------
+# --- #1 auth needs username/password accounts AND an API key ----------------
 
-async def test_provider_configured_without_api_key(db):
+async def test_provider_not_configured_without_api_key(db):
+    # The OpenSubtitles REST API rejects every request without an Api-Key
+    # header, so accounts alone are not enough.
     provider = OpenSubtitlesProvider("", AccountManager(db, [("u", "p")]))
-    assert provider.configured is True   # accounts present, no key needed
+    assert provider.configured is False
 
 
 async def test_provider_not_configured_without_accounts(db):
