@@ -119,9 +119,14 @@ async def _run_downloads(
     failures = 0
     if dry_run:
         for m in media:
-            outcome = await ctx.downloader.download_for(
-                m, language, min_confidence=min_confidence, dry_run=True
-            )
+            try:
+                outcome = await ctx.downloader.download_for(
+                    m, language, min_confidence=min_confidence, dry_run=True
+                )
+            except Exception as exc:
+                print(f"err {m.filename}: {exc}")
+                failures += 1
+                continue
             print(("ok " if outcome.success else "-- ") + f"{m.filename}: {outcome.message}")
             failures += 0 if outcome.success else 1
         return failures
