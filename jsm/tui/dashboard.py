@@ -89,18 +89,22 @@ class DashboardScreen(Screen):
         def mark(ok: bool, label_ok: str, label_bad: str) -> str:
             return f"[green]✓[/green] {label_ok}" if ok else f"[red]✗[/red] {label_bad}"
 
+        from jsm.subtitles.cleaner import subscleaner_available
+
         tools = [
             "[b]Tools & provider[/b]",
             "",
+            "  " + mark(bool(ctx.accounts.usernames),
+                       f"{len(ctx.accounts.usernames)} account(s) for login/rotation",
+                       "no accounts in accounts.conf - downloads disabled"),
             "  " + mark(ffprobe_available(), "ffprobe available",
                        "ffprobe missing - no duration/embedded-subtitle detection"),
             "  " + mark(ffsubsync_available(), "ffsubsync available",
                        "ffsubsync missing - sync actions disabled"),
-            "  " + mark(bool(ctx.settings.api_key), "OpenSubtitles API key set",
-                       "no API key - set api_key in config.toml"),
-            "  " + mark(bool(ctx.accounts.usernames),
-                       f"{len(ctx.accounts.usernames)} account(s) for rotation",
-                       "no accounts in accounts.conf"),
+            "  " + mark(subscleaner_available(), "subscleaner available",
+                       "subscleaner missing - cleanup disabled"),
+            ("  [green]✓[/green] API key set (optional)" if ctx.settings.api_key
+             else "  [dim]· API key not set (optional)[/dim]"),
         ]
         self.query_one("#dash-tools", Static).update("\n".join(tools))
 

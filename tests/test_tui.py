@@ -66,7 +66,7 @@ async def test_browse_select_download_flow(app, media_tree):
             str(media_tree / "new-movies" / "Winnie The Pooh (2011).mkv")
         )
         assert winnie.status == MediaStatus.OK
-        assert (media_tree / "new-movies" / "Winnie The Pooh (2011).en.srt").read_bytes() == SRT
+        assert (media_tree / "new-movies" / "Winnie The Pooh (2011).eng.srt").read_bytes() == SRT
 
 
 async def test_queue_screen_shows_jobs(app, media_tree):

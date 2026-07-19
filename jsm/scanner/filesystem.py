@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from jsm.database.db import Database, _now
 from jsm.database.models import Media, MediaStatus, Subtitle, SyncStatus
@@ -22,6 +23,9 @@ from jsm.subtitles.language import normalize_language, parse_subtitle_filename
 from jsm.subtitles.fileops import SUBTITLE_EXTENSIONS
 
 MEDIA_EXTENSIONS = {".mkv", ".mp4", ".avi", ".webm"}
+
+# Called after each directory with (running stats, directory just finished).
+ProgressCallback = Callable[["ScanStats", Path], None]
 
 
 @dataclass
@@ -67,13 +71,21 @@ class Scanner:
 
     # ------------------------------------------------------------------ public
 
-    def scan(self, root: str | Path, recursive: bool = True) -> ScanStats:
+    def scan(
+        self,
+        root: str | Path,
+        recursive: bool = True,
+        on_progress: "ProgressCallback | None" = None,
+    ) -> ScanStats:
+        """Scan *root*. If *on_progress* is given it is called with the running
+        ScanStats and the current directory after each folder is processed -
+        used by the CLI to print live progress for large libraries."""
         stats = ScanStats()
         root = Path(root)
         if not root.is_dir():
             stats.warnings.append(f"Not a directory: {root}")
             return stats
-        self._scan_dir(root, recursive, stats)
+        self._scan_dir(root, recursive, stats, on_progress)
         return stats
 
     def rescan_media(self, media: Media) -> Media:
@@ -88,7 +100,13 @@ class Scanner:
 
     # ----------------------------------------------------------------- internal
 
-    def _scan_dir(self, directory: Path, recursive: bool, stats: ScanStats) -> None:
+    def _scan_dir(
+        self,
+        directory: Path,
+        recursive: bool,
+        stats: ScanStats,
+        on_progress: "ProgressCallback | None" = None,
+    ) -> None:
         try:
             entries = list(os.scandir(directory))
         except OSError as exc:
@@ -134,9 +152,12 @@ class Scanner:
         # instead of ~2 fsyncs per file.
         self.db.conn.commit()
 
+        if on_progress is not None:
+            on_progress(stats, directory)
+
         if recursive:
             for subdir in sorted(subdirs):
-                self._scan_dir(subdir, recursive, stats)
+                self._scan_dir(subdir, recursive, stats, on_progress)
 
     @staticmethod
     def _subtitle_files_in(directory: Path) -> list[Path]:

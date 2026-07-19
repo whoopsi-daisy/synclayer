@@ -46,6 +46,8 @@ def _parser() -> argparse.ArgumentParser:
                           help="all files with missing subtitles in the library")
     download.add_argument("--language", "-l", help="subtitle language (default: first configured)")
     download.add_argument("--sync", action="store_true", help="run ffsubsync after downloading")
+    download.add_argument("--clean", action="store_true",
+                          help="run subscleaner on each downloaded subtitle")
     download.add_argument("--dry-run", action="store_true", help="preview without downloading")
     download.add_argument("--min-confidence", type=float, default=None,
                           help="minimum match confidence 0..1 (bulk default from config)")
@@ -56,13 +58,20 @@ def _parser() -> argparse.ArgumentParser:
     sync.add_argument("paths", nargs="+", help="media files or folders")
     sync.add_argument("--language", "-l", help="subtitle language (default: first configured)")
 
+    clean = sub.add_parser("clean", help="clean ads/spam from existing subtitles (subscleaner)")
+    clean.add_argument("paths", nargs="+", help="media files or folders")
+    clean.add_argument("--language", "-l", help="subtitle language (default: first configured)")
+    clean.add_argument("--dry-run", action="store_true", help="list what would be cleaned")
+
     maintain = sub.add_parser("maintain", help="full cycle: scan, download missing, optional sync")
     maintain.add_argument("--sync", action="store_true", help="also synchronize downloads")
+    maintain.add_argument("--clean", action="store_true", help="also clean downloaded subtitles")
     maintain.add_argument("--dry-run", action="store_true")
     maintain.add_argument("--min-confidence", type=float, default=None)
     maintain.add_argument("--yes", action="store_true",
                           help=f"skip the typed '{BULK_CONFIRM_PHRASE}' confirmation")
 
+    sub.add_parser("accounts", help="validate OpenSubtitles accounts and show quota")
     sub.add_parser("doctor", help="check the environment and configuration")
     return parser
 
@@ -90,22 +99,26 @@ def cmd_doctor(ctx: AppContext) -> int:
     for path in ctx.settings.library_paths:
         healthy &= line(path.is_dir(), f"library exists: {path}",
                         f"library path not found: {path}", fatal=True)
-    healthy &= line(bool(ctx.settings.api_key),
-                    "OpenSubtitles API key set",
-                    "no api_key in config.toml - downloads will fail "
-                    "(free key: https://www.opensubtitles.com/en/consumers)",
-                    fatal=True)
     accounts = ctx.accounts.usernames
     healthy &= line(bool(accounts),
-                    f"{len(accounts)} OpenSubtitles account(s) in accounts.conf",
-                    "no accounts in accounts.conf - downloads will fail",
+                    f"{len(accounts)} OpenSubtitles account(s) in accounts.conf "
+                    "(username/password login)",
+                    "no accounts in accounts.conf - downloads will fail "
+                    "(add 'username;password' lines)",
                     fatal=True)
+    line(bool(ctx.settings.api_key),
+         "OpenSubtitles API key set (optional)",
+         "no api_key set - optional, only needed if your account requires one")
     line(ffprobe_available(), "ffprobe found (media analysis enabled)",
          "ffprobe not found - install ffmpeg for duration/embedded-subtitle "
          "detection (optional)")
     line(ffsubsync_available(), "ffsubsync found (subtitle sync enabled)",
          "ffsubsync not found - sync actions disabled "
          "(pip install 'jellyfin-subtitle-manager[sync]', optional)")
+    from jsm.subtitles.cleaner import subscleaner_available
+
+    line(subscleaner_available(), "subscleaner found (subtitle cleanup enabled)",
+         "subscleaner not found - cleanup disabled (pip install subscleaner, optional)")
     stats = ctx.db.media_stats()
     print(f"  info  database has {stats.get('total', 0)} media file(s) "
           f"({stats.get('missing', 0)} missing subtitles)")
@@ -120,9 +133,19 @@ def _scan_paths(ctx: AppContext, paths: list[str]) -> None:
         print("No libraries configured and no paths given. "
               f"Edit {config.config_file()} first.", file=sys.stderr)
         raise SystemExit(2)
+    # Live per-directory counter, refreshed in place on a TTY.
+    live = sys.stdout.isatty()
+
+    def on_progress(stats, directory) -> None:
+        if live:
+            print(f"\r  scanned {stats.scanned} file(s) in {stats.directories} "
+                  f"folder(s)…", end="", flush=True)
+
     for root in roots:
         print(f"Scanning {root} …")
-        stats = ctx.scanner.scan(root, recursive=True)
+        stats = ctx.scanner.scan(root, recursive=True, on_progress=on_progress)
+        if live:
+            print("\r", end="")
         for warning in stats.warnings:
             print(f"  warning: {warning}", file=sys.stderr)
         print(f"  {stats.scanned} file(s) in {stats.directories} folder(s) "
@@ -242,10 +265,88 @@ def cmd_download(ctx: AppContext, args: argparse.Namespace) -> int:
             print("Nothing to do.")
             return 0
     sync = args.sync or ctx.settings.sync_by_default
+    if args.clean or ctx.settings.clean_by_default:
+        ctx.worker.clean_downloads = True
     failures = asyncio.run(_in_one_loop(
         ctx, _run_downloads(ctx, media, language, sync, args.dry_run, min_confidence)
     ))
     return 1 if failures else 0
+
+
+def cmd_clean(ctx: AppContext, args: argparse.Namespace) -> int:
+    from jsm.subtitles.cleaner import subscleaner_available
+
+    if not subscleaner_available():
+        print("subscleaner is not installed. Install it with: pip install subscleaner",
+              file=sys.stderr)
+        return 2
+    language = _language(ctx, args.language)
+    media = _collect_media(ctx, args.paths)
+    if not media:
+        print("Nothing to do.")
+        return 0
+    if args.dry_run:
+        n = 0
+        for m in media:
+            assert m.id is not None
+            subs = [s for s in ctx.db.subtitles_for(m.id)
+                    if s.path and s.language in (language, "und")]
+            for s in subs:
+                print(f"-- would clean {Path(s.path).name}")
+                n += 1
+        print(f"[dry-run] {n} subtitle file(s) would be cleaned")
+        return 0
+    job_ids = set()
+    for m in media:
+        assert m.id is not None
+        job = ctx.worker.enqueue(m.id, JobAction.CLEAN, language)
+        job_ids.add(job.id)
+    asyncio.run(_in_one_loop(ctx, ctx.worker.run_until_empty()))
+    failures = 0
+    for job in ctx.db.jobs():
+        if job.id not in job_ids:
+            continue
+        name = Path(job.media_path or "?").name
+        if job.status == JobStatus.COMPLETED:
+            print(f"ok  {name}: {job.detail or 'cleaned'}")
+        elif job.status == JobStatus.FAILED:
+            failures += 1
+            print(f"err {name}: {job.error_message}")
+    return 1 if failures else 0
+
+
+def cmd_accounts(ctx: AppContext) -> int:
+    """Validate each configured account by logging in, and show quota."""
+    usernames = ctx.accounts.usernames
+    if not usernames:
+        print("No accounts configured. Add 'username;password' lines to "
+              f"{config.accounts_file()}", file=sys.stderr)
+        return 2
+    print(f"Checking {len(usernames)} OpenSubtitles account(s)...")
+    if ctx.settings.api_key:
+        print("  (API key is set and will be sent as well)")
+
+    async def check() -> int:
+        bad = 0
+        try:
+            for username in usernames:
+                quota = ctx.accounts.quota(username)
+                ok, message = await ctx.provider.validate_account(username)
+                mark = "ok " if ok else "ERR"
+                print(f"  {mark} {username:<20} {quota.remaining:>2}/20 downloads left"
+                      + ("" if ok else f"  - {message}"))
+                bad += 0 if ok else 1
+        finally:
+            await ctx.provider.close()
+        return bad
+
+    bad = asyncio.run(check())
+    if bad:
+        print(f"{bad} account(s) failed to authenticate - fix them in "
+              f"{config.accounts_file()}")
+    else:
+        print("All accounts authenticated successfully.")
+    return 1 if bad else 0
 
 
 def cmd_sync(ctx: AppContext, args: argparse.Namespace) -> int:
@@ -285,6 +386,8 @@ def cmd_maintain(ctx: AppContext, args: argparse.Namespace) -> int:
     if not _confirm_bulk(len(media), args.yes, args.dry_run):
         return 1
     sync = args.sync or ctx.settings.sync_by_default
+    if args.clean or ctx.settings.clean_by_default:
+        ctx.worker.clean_downloads = True
     failures = asyncio.run(_in_one_loop(
         ctx, _run_downloads(ctx, media, _language(ctx, None), sync, args.dry_run, min_confidence)
     ))
@@ -317,10 +420,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "doctor":
             return cmd_doctor(ctx)
+        if args.command == "accounts":
+            return cmd_accounts(ctx)
         if args.command == "download":
             return cmd_download(ctx, args)
         if args.command == "sync":
             return cmd_sync(ctx, args)
+        if args.command == "clean":
+            return cmd_clean(ctx, args)
         if args.command == "maintain":
             return cmd_maintain(ctx, args)
         return 2

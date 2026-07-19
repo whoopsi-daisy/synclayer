@@ -34,7 +34,8 @@ async def test_download_job_end_to_end(db, media_tree, worker):
 
     job = db.jobs()[0]
     assert job.status == JobStatus.COMPLETED
-    sub_path = media_tree / "new-movies" / "Winnie The Pooh (2011).en.srt"
+    # Jellyfin-style ISO 639-2/B filename derived from the video basename.
+    sub_path = media_tree / "new-movies" / "Winnie The Pooh (2011).eng.srt"
     assert sub_path.read_bytes() == SRT
     assert db.get_media(media.id).status == MediaStatus.OK
     # media files untouched, byte for byte
@@ -52,12 +53,12 @@ async def test_second_download_never_overwrites(db, media_tree, worker):
     media = next(m for m in db.all_media() if "Winnie" in m.filename)
     worker.enqueue(media.id, JobAction.DOWNLOAD, "en")
     await worker.run_until_empty()
-    first = media_tree / "new-movies" / "Winnie The Pooh (2011).en.srt"
+    first = media_tree / "new-movies" / "Winnie The Pooh (2011).eng.srt"
     first.write_bytes(b"user edited this file")
     worker.enqueue(media.id, JobAction.DOWNLOAD, "en")
     await worker.run_until_empty()
     assert first.read_bytes() == b"user edited this file"
-    assert (media_tree / "new-movies" / "Winnie The Pooh (2011).en.2.srt").exists()
+    assert (media_tree / "new-movies" / "Winnie The Pooh (2011).eng.2.srt").exists()
 
 
 async def test_min_confidence_blocks_weak_matches(db, scanner, media_tree):
@@ -127,5 +128,5 @@ async def test_dry_run_writes_nothing(db, media_tree, scanner, fake_provider):
     assert outcome.success
     assert outcome.dry_run
     assert "[dry-run]" in outcome.message
-    assert not (media_tree / "new-movies" / "Winnie The Pooh (2011).en.srt").exists()
+    assert not (media_tree / "new-movies" / "Winnie The Pooh (2011).eng.srt").exists()
     assert fake_provider.download_count == 0

@@ -16,7 +16,7 @@ from jsm.database.db import Database
 from jsm.database.models import JobAction, JobStatus, QueueJob, SyncStatus
 from jsm.providers.accounts import AccountManager
 from jsm.providers.opensubtitles import NotConfiguredError, OpenSubtitlesError, QuotaExceededError
-from jsm.subtitles import synchronizer
+from jsm.subtitles import cleaner, synchronizer
 from jsm.subtitles.downloader import Downloader
 from jsm.subtitles.language import normalize_language
 
@@ -32,6 +32,7 @@ class QueueWorker:
         on_update: UpdateCallback | None = None,
         idle_poll_seconds: float = 1.0,
         concurrency: int = 1,
+        clean_downloads: bool = False,
     ):
         self.db = db
         self.downloader = downloader
@@ -39,6 +40,8 @@ class QueueWorker:
         self.on_update = on_update
         self.idle_poll_seconds = idle_poll_seconds
         self.concurrency = max(1, concurrency)
+        # Run subscleaner on each freshly downloaded subtitle (from config).
+        self.clean_downloads = clean_downloads
         self._stop = asyncio.Event()
         self._wakeup = asyncio.Event()
 
@@ -150,6 +153,8 @@ class QueueWorker:
                     self._update(job, status=JobStatus.FAILED, error_message=outcome.message)
                     return
                 self._update(job, status=JobStatus.DOWNLOADING, detail=outcome.message)
+                if self.clean_downloads and outcome.subtitle_path:
+                    await self._clean_file(job, outcome.subtitle_path)
                 if job.action == JobAction.DOWNLOAD_SYNC and outcome.subtitle_path:
                     await self._sync_file(job, media.path, outcome.subtitle_path)
                 self._update(job, status=JobStatus.COMPLETED)
@@ -162,6 +167,16 @@ class QueueWorker:
                     )
                     return
                 await self._sync_file(job, media.path, target, fail_job=True)
+            elif job.action == JobAction.CLEAN:
+                target = self._sync_target(job)
+                if target is None:
+                    self._update(
+                        job, status=JobStatus.FAILED,
+                        error_message=f"No '{job.language}' subtitle to clean",
+                    )
+                    return
+                await self._clean_file(job, target)
+                self._update(job, status=JobStatus.COMPLETED)
             else:
                 self._update(job, status=JobStatus.FAILED, error_message=f"Unknown action {job.action}")
         except QuotaExceededError:
@@ -190,6 +205,12 @@ class QueueWorker:
             reverse=True,
         )
         return candidates[0].path if candidates else None
+
+    async def _clean_file(self, job: QueueJob, subtitle_path: str) -> None:
+        """Run subscleaner; a cleanup failure is never fatal to the job."""
+        self._update(job, detail=f"Cleaning {subtitle_path}")
+        changed, message = await cleaner.clean(subtitle_path)
+        self._update(job, detail=message)
 
     async def _sync_file(
         self, job: QueueJob, media_path: str, subtitle_path: str, fail_job: bool = False

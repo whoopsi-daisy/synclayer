@@ -27,16 +27,25 @@ Think *Radarr/Sonarr, but for subtitles — with you in the driver's seat.*
 - **Optional synchronization** — ffsubsync is off by default (CPU intensive);
   choose *Download+Sync* or *Download only* per action, or flip the global
   default.
-- **Account rotation** — multiple OpenSubtitles accounts, each with 20
-  downloads per rolling 24 h; jsm always uses the account with the most
-  remaining quota and parks jobs until quota refreshes when all are spent.
+- **Username/password login** — authentication uses the accounts in
+  `accounts.conf`; an OpenSubtitles API key is *optional*. Multiple accounts
+  rotate automatically (20 downloads per rolling 24 h each), and jobs park
+  until quota refreshes when all are spent. `jsm accounts` validates them.
+- **Jellyfin-native filenames** — downloaded subtitles are named from the
+  local video basename plus the ISO 639-2/B language code
+  (`Movie.mp4 → Movie.eng.srt`). Provider filenames are never used.
+- **Automatic cleanup** — optionally run [subscleaner](https://pypi.org/project/subscleaner/)
+  on downloaded subtitles to strip ads/spam lines (`--clean`, or `jsm clean`).
+- **Graceful under pressure** — rate limits (HTTP 429) are honored with
+  back-off, server errors and network hiccups are retried, and quota
+  exhaustion parks jobs instead of failing them.
 - **Safe by construction** — media files are never opened for writing;
   subtitle writes are atomic; existing files are never silently overwritten
-  (collision-safe `movie.en.2.srt` naming, `.bak` backups before sync
-  replaces a file); bulk operations require typing `DOWNLOAD ALL` and support
+  (collision-safe `Movie.eng.2.srt` naming, `.bak` backups before sync/clean
+  rewrites a file); bulk operations require typing `DOWNLOAD ALL` and support
   `--dry-run`.
-- **Scales** — incremental scanning (unchanged files are skipped), lazy
-  hashing, per-folder browsing queries, indexed SQLite (WAL).
+- **Scales** — incremental scanning with live progress, lazy hashing,
+  per-folder browsing queries, indexed SQLite (WAL).
 
 ## Installation
 
@@ -47,6 +56,9 @@ your system (ffmpeg, ffsubsync, distro-packaged Python libraries):
 ./install.sh              # core
 ./install.sh --with-sync  # + ffsubsync for subtitle synchronization
 ```
+
+Optional cleanup support (subscleaner) can be added any time with
+`pip install subscleaner` or `pip install .[clean]` (`.[all]` for both).
 
 The script checks for Python 3.11+, installs jsm into a private virtualenv
 (created with `--system-site-packages`, so existing Python dependencies are
@@ -73,27 +85,29 @@ jsm doctor
 
 First run creates `~/.config/jellyfin-subtitle-manager/`:
 
-- **`config.toml`** — set your library roots, wanted languages, and your
-  OpenSubtitles **API key** (required by their REST API; free at
-  <https://www.opensubtitles.com/en/consumers>):
-
-  ```toml
-  libraries = ["/media", "/media2"]
-  languages = ["en"]
-  api_key = "YOUR_API_KEY"
-  sync_by_default = false
-  bulk_min_confidence = 0.99
-  ```
-
-- **`accounts.conf`** — one `username;password` per line (file is chmod 600;
-  no credentials ship with the app):
+- **`accounts.conf`** — the primary credential. One `username;password` per
+  line (file is chmod 600; no credentials ship with the app):
 
   ```
   myuser;mypassword
   otheruser;otherpassword
   ```
 
-  Add several accounts and jsm rotates between them automatically.
+  Add several accounts and jsm rotates between them automatically. Validate
+  them with `jsm accounts`.
+
+- **`config.toml`** — library roots, wanted languages, and optional settings.
+  The OpenSubtitles **API key is optional** — set it only if your account
+  requires one (free at <https://www.opensubtitles.com/en/consumers>):
+
+  ```toml
+  libraries = ["/media", "/media2"]
+  languages = ["en"]        # ISO 639-1; output files use 639-2/B (eng, ...)
+  api_key = ""              # optional
+  sync_by_default = false   # run ffsubsync after every download
+  clean_by_default = false  # run subscleaner after every download
+  bulk_min_confidence = 0.99
+  ```
 
 ## Usage
 
@@ -122,11 +136,14 @@ jsm
 ### CLI (automation)
 
 ```bash
-jsm scan                          # scan configured libraries
+jsm scan                          # scan configured libraries (live progress)
+jsm accounts                      # validate OpenSubtitles logins + show quota
+jsm doctor                        # check environment and configuration
 jsm missing --format csv -o report.csv
-jsm download /media/new-movies --sync
+jsm download /media/new-movies --sync --clean
 jsm download --all --dry-run      # preview a bulk run, writes nothing
-jsm sync /media/movies/Alien.mkv
+jsm sync  /media/movies/Alien.mkv # ffsubsync existing subtitles
+jsm clean /media/movies --dry-run # subscleaner ad/spam removal
 jsm maintain --yes                # scan → report → download missing
 ```
 
@@ -138,8 +155,9 @@ The program is built so it **cannot damage your media**:
    (`jsm/subtitles/fileops.py`) that refuses any path without a subtitle
    extension (`.srt` `.ass` `.ssa` `.vtt`).
 2. Writes are atomic (temp file + rename) — no half-written subtitles.
-3. Existing subtitles are never silently overwritten; replacements (sync)
-   keep a `.bak` of the original.
+3. Existing subtitles are never silently overwritten; replacements (sync and
+   clean) keep a `.bak` of the original, and cleanup runs on a temp copy so
+   the original is only replaced on success.
 4. Bulk downloads are gated behind a typed `DOWNLOAD ALL` confirmation, a
    confidence threshold (99% = hash matches only), and a dry-run mode.
 

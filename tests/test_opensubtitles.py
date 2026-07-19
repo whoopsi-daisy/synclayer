@@ -39,31 +39,51 @@ def make_provider(db, handler, accounts=None):
     return OpenSubtitlesProvider("test-key", mgr, client=client), mgr
 
 
-async def test_requires_api_key(db):
-    provider, _ = make_provider(db, lambda r: httpx.Response(200))
-    provider.api_key = ""
-    with pytest.raises(NotConfiguredError):
+async def test_requires_accounts_not_api_key(db):
+    # Username/password is the primary auth: no accounts -> not configured,
+    # even though a search would otherwise not need an API key.
+    provider, _ = make_provider(db, lambda r: httpx.Response(200), accounts=[])
+    with pytest.raises(NotConfiguredError, match="accounts.conf"):
         await provider.search(["en"], query="x")
 
 
-async def test_search_parses_candidates(db):
+async def test_search_works_without_api_key(db):
     seen = {}
 
     def handler(request):
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "session-token"})
         seen["params"] = dict(request.url.params)
         seen["api_key"] = request.headers.get("Api-Key")
+        seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json=SEARCH_RESPONSE)
 
+    # No API key configured - login-based auth must still work.
     provider, _ = make_provider(db, handler)
+    provider.api_key = ""
     results = await provider.search(["en"], moviehash="abc123", query="Inception", year=2010)
-    assert seen["api_key"] == "test-key"
+    assert seen["api_key"] is None          # no key sent when not configured
+    assert seen["auth"] == "Bearer session-token"
     assert seen["params"]["moviehash"] == "abc123"
     assert seen["params"]["query"] == "Inception"
-    assert seen["params"]["year"] == "2010"
     assert len(results) == 1  # entry without files skipped
     assert results[0].file_id == "111"
     assert results[0].moviehash_match is True
     assert results[0].downloads == 1234
+
+
+async def test_api_key_sent_when_configured(db):
+    seen = {}
+
+    def handler(request):
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "t"})
+        seen["api_key"] = request.headers.get("Api-Key")
+        return httpx.Response(200, json=SEARCH_RESPONSE)
+
+    provider, _ = make_provider(db, handler)  # api_key="test-key"
+    await provider.search(["en"], query="Inception")
+    assert seen["api_key"] == "test-key"
 
 
 async def test_download_logs_in_and_records_quota(db):

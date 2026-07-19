@@ -39,14 +39,19 @@ libraries = []
 # Subtitle languages you want, in priority order (ISO 639-1 codes).
 languages = ["en"]
 
-# OpenSubtitles.com API key (required by their REST API in addition to the
-# per-account logins in accounts.conf). Create one for free at
+# OpenSubtitles authentication uses the username/password logins in
+# accounts.conf by default - that is all you need. An application API key is
+# OPTIONAL: set it here only if your account requires one. Get one free at
 # https://www.opensubtitles.com/en/consumers
 api_key = ""
 
 # Run ffsubsync after every download by default. Off by default because it is
 # CPU intensive; the interactive workflow lets you choose per action anyway.
 sync_by_default = false
+
+# Run subscleaner on each downloaded subtitle to strip ads/spam lines.
+# Off by default; requires the 'subscleaner' command (pip install subscleaner).
+clean_by_default = false
 
 # Minimum match confidence for bulk ("download all") operations. 0.99 means
 # hash matches only.
@@ -63,6 +68,7 @@ class Settings:
     languages: list[str] = field(default_factory=lambda: ["en"])
     api_key: str = ""
     sync_by_default: bool = False
+    clean_by_default: bool = False
     bulk_min_confidence: float = 0.99
     queue_concurrency: int = 1
 

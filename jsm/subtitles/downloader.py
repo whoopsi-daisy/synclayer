@@ -17,7 +17,7 @@ from jsm.providers.base import SubtitleCandidate, SubtitleProvider
 from jsm.scanner.filesystem import Scanner
 from jsm.scanner.moviehash import compute_moviehash
 from jsm.subtitles.fileops import next_free_path, safe_write_subtitle, subtitle_destination
-from jsm.subtitles.language import normalize_language
+from jsm.subtitles.language import normalize_language, to_iso639_2
 from jsm.subtitles.matcher import guess_media, rank_candidates
 
 
@@ -109,8 +109,12 @@ class Downloader:
                 confidence=best.confidence, dry_run=dry_run,
             )
 
+        # Jellyfin wants the ISO 639-2/B (three-letter) code in the filename,
+        # e.g. Movie.mp4 -> Movie.eng.srt. Internal handling stays 639-1.
         dest = next_free_path(
-            subtitle_destination(Path(media.path), language, best.extension)
+            subtitle_destination(
+                Path(media.path), to_iso639_2(language), best.extension
+            )
         )
         if dry_run:
             return DownloadOutcome(

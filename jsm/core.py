@@ -31,7 +31,8 @@ class AppContext:
         self.downloader = Downloader(self.db, self.provider, self.scanner, self.settings)
         self.worker = QueueWorker(self.db, self.downloader, self.accounts,
                                   on_update=on_job_update,
-                                  concurrency=self.settings.queue_concurrency)
+                                  concurrency=self.settings.queue_concurrency,
+                                  clean_downloads=self.settings.clean_by_default)
 
     def new_scanner(self) -> tuple[Database, Scanner]:
         """A scanner bound to a fresh DB connection, for use in a thread."""

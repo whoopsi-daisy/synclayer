@@ -89,5 +89,11 @@ def safe_write_subtitle(dest: Path, data: bytes, overwrite: bool = False) -> Pat
 
 
 def subtitle_destination(media_path: Path, language: str, extension: str = ".srt") -> Path:
-    """Jellyfin-style sidecar name: ``Movie (1979).en.srt`` next to the video."""
+    """Jellyfin-style sidecar next to the video.
+
+    *language* must already be the ISO 639-2/B three-letter code Jellyfin
+    expects, so the sidecar is named from the LOCAL video basename plus that
+    code: ``Movie.mp4`` -> ``Movie.eng.srt``. Provider filenames are never
+    used - the name is derived purely from the video on disk.
+    """
     return media_path.with_name(f"{media_path.stem}.{language}{extension}")

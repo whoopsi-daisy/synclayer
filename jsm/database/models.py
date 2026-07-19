@@ -37,6 +37,7 @@ class JobAction(StrEnum):
     DOWNLOAD = "download"
     DOWNLOAD_SYNC = "download_sync"
     SYNC = "sync"
+    CLEAN = "clean"
 
 
 ACTIVE_JOB_STATUSES = (
