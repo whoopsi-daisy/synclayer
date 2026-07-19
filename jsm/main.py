@@ -22,6 +22,7 @@ from jsm.config import settings as config
 from jsm.core import AppContext
 from jsm.database.models import JobAction, JobStatus, Media, MediaStatus
 from jsm.reports import format_report, missing_report
+from jsm.subtitles.language import normalize_language
 
 BULK_CONFIRM_PHRASE = "DOWNLOAD ALL"
 
@@ -138,14 +139,15 @@ def _scan_paths(ctx: AppContext, paths: list[str]) -> None:
 
     def on_progress(stats, directory) -> None:
         if live:
+            # \033[K clears to end of line so shorter updates don't leave debris.
             print(f"\r  scanned {stats.scanned} file(s) in {stats.directories} "
-                  f"folder(s)…", end="", flush=True)
+                  f"folder(s)…\033[K", end="", flush=True)
 
     for root in roots:
         print(f"Scanning {root} …")
         stats = ctx.scanner.scan(root, recursive=True, on_progress=on_progress)
         if live:
-            print("\r", end="")
+            print("\r\033[K", end="")
         for warning in stats.warnings:
             print(f"  warning: {warning}", file=sys.stderr)
         print(f"  {stats.scanned} file(s) in {stats.directories} folder(s) "
@@ -280,7 +282,7 @@ def cmd_clean(ctx: AppContext, args: argparse.Namespace) -> int:
         print("subscleaner is not installed. Install it with: pip install subscleaner",
               file=sys.stderr)
         return 2
-    language = _language(ctx, args.language)
+    language = normalize_language(_language(ctx, args.language)) or _language(ctx, args.language)
     media = _collect_media(ctx, args.paths)
     if not media:
         print("Nothing to do.")

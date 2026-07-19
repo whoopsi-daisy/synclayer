@@ -9,17 +9,17 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import tempfile
 from pathlib import Path
 
 from jsm.subtitles.fileops import safe_write_subtitle
+from jsm.tools import resolve_tool, tool_available
 
 SYNC_TIMEOUT_SECONDS = 15 * 60  # ffsubsync on a long movie can take a while
 
 
 def ffsubsync_available() -> bool:
-    return shutil.which("ffsubsync") is not None
+    return tool_available("ffsubsync")
 
 
 async def synchronize(media_path: str | Path, subtitle_path: str | Path) -> tuple[bool, str]:
@@ -36,8 +36,9 @@ async def synchronize(media_path: str | Path, subtitle_path: str | Path) -> tupl
     fd, tmp_out = tempfile.mkstemp(suffix=subtitle_path.suffix, prefix="jsm-sync-")
     os.close(fd)
     try:
+        ffsubsync = resolve_tool("ffsubsync") or "ffsubsync"
         proc = await asyncio.create_subprocess_exec(
-            "ffsubsync", str(media_path), "-i", str(subtitle_path), "-o", tmp_out,
+            ffsubsync, str(media_path), "-i", str(subtitle_path), "-o", tmp_out,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         try:

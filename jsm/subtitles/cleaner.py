@@ -17,12 +17,13 @@ import tempfile
 from pathlib import Path
 
 from jsm.subtitles.fileops import safe_write_subtitle
+from jsm.tools import resolve_tool, tool_available
 
 CLEAN_TIMEOUT_SECONDS = 120
 
 
 def subscleaner_available() -> bool:
-    return shutil.which("subscleaner") is not None
+    return tool_available("subscleaner")
 
 
 async def clean(subtitle_path: str | Path) -> tuple[bool, str]:
@@ -43,8 +44,9 @@ async def clean(subtitle_path: str | Path) -> tuple[bool, str]:
         shutil.copy2(subtitle_path, tmp)
         original = Path(tmp).read_bytes()
         try:
+            subscleaner = resolve_tool("subscleaner") or "subscleaner"
             proc = await asyncio.create_subprocess_exec(
-                "subscleaner", tmp,
+                subscleaner, tmp,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await asyncio.wait_for(proc.communicate(), CLEAN_TIMEOUT_SECONDS)

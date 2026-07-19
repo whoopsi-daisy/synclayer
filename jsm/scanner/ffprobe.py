@@ -7,10 +7,11 @@ the caller shows a warning; nothing else breaks.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from jsm.tools import resolve_tool, tool_available
 
 
 @dataclass
@@ -30,16 +31,17 @@ class ProbeResult:
 
 
 def ffprobe_available() -> bool:
-    return shutil.which("ffprobe") is not None
+    return tool_available("ffprobe")
 
 
 def probe(path: str | Path, timeout: int = 30) -> ProbeResult | None:
     """Analyse *path* with ffprobe. Returns ``None`` when ffprobe is missing/fails."""
-    if not ffprobe_available():
+    ffprobe = resolve_tool("ffprobe")
+    if ffprobe is None:
         return None
     try:
         proc = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
+            [ffprobe, "-v", "quiet", "-print_format", "json",
              "-show_format", "-show_streams", str(path)],
             capture_output=True, timeout=timeout, check=False,
         )
