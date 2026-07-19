@@ -62,7 +62,56 @@ def _parser() -> argparse.ArgumentParser:
     maintain.add_argument("--min-confidence", type=float, default=None)
     maintain.add_argument("--yes", action="store_true",
                           help=f"skip the typed '{BULK_CONFIRM_PHRASE}' confirmation")
+
+    sub.add_parser("doctor", help="check the environment and configuration")
     return parser
+
+
+def cmd_doctor(ctx: AppContext) -> int:
+    """Environment sanity check - mirrors the dashboard's tools panel."""
+    import platform
+
+    from jsm.scanner.ffprobe import ffprobe_available
+    from jsm.subtitles.synchronizer import ffsubsync_available
+
+    def line(ok: bool, good: str, bad: str, fatal: bool = False) -> bool:
+        print(("  ok  " if ok else ("  ERR " if fatal else "  --  "))
+              + (good if ok else bad))
+        return ok or not fatal
+
+    print(f"Synclayer doctor (Python {platform.python_version()})")
+    print(f"  config: {config.config_file()}")
+    print(f"  data:   {ctx.db_path}")
+    healthy = True
+    healthy &= line(bool(ctx.settings.libraries),
+                    f"libraries configured: {', '.join(ctx.settings.libraries)}",
+                    "no libraries configured - set 'libraries' in config.toml",
+                    fatal=True)
+    for path in ctx.settings.library_paths:
+        healthy &= line(path.is_dir(), f"library exists: {path}",
+                        f"library path not found: {path}", fatal=True)
+    healthy &= line(bool(ctx.settings.api_key),
+                    "OpenSubtitles API key set",
+                    "no api_key in config.toml - downloads will fail "
+                    "(free key: https://www.opensubtitles.com/en/consumers)",
+                    fatal=True)
+    accounts = ctx.accounts.usernames
+    healthy &= line(bool(accounts),
+                    f"{len(accounts)} OpenSubtitles account(s) in accounts.conf",
+                    "no accounts in accounts.conf - downloads will fail",
+                    fatal=True)
+    line(ffprobe_available(), "ffprobe found (media analysis enabled)",
+         "ffprobe not found - install ffmpeg for duration/embedded-subtitle "
+         "detection (optional)")
+    line(ffsubsync_available(), "ffsubsync found (subtitle sync enabled)",
+         "ffsubsync not found - sync actions disabled "
+         "(pip install 'jellyfin-subtitle-manager[sync]', optional)")
+    stats = ctx.db.media_stats()
+    print(f"  info  database has {stats.get('total', 0)} media file(s) "
+          f"({stats.get('missing', 0)} missing subtitles)")
+    print("Everything needed for downloads is in place."
+          if healthy else "Fix the ERR lines above, then re-run 'jsm doctor'.")
+    return 0 if healthy else 1
 
 
 def _scan_paths(ctx: AppContext, paths: list[str]) -> None:
@@ -266,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(report, end="")
             return 0
+        if args.command == "doctor":
+            return cmd_doctor(ctx)
         if args.command == "download":
             return cmd_download(ctx, args)
         if args.command == "sync":

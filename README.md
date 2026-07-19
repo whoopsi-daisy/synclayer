@@ -40,13 +40,34 @@ Think *Radarr/Sonarr, but for subtitles — with you in the driver's seat.*
 
 ## Installation
 
+One command, safe to re-run, and it **reuses anything already installed** on
+your system (ffmpeg, ffsubsync, distro-packaged Python libraries):
+
 ```bash
-pip install .            # core
-pip install .[sync]      # + ffsubsync for subtitle synchronization
+./install.sh              # core
+./install.sh --with-sync  # + ffsubsync for subtitle synchronization
 ```
 
-Requires Python 3.11+. `ffprobe` (ffmpeg) is optional but recommended —
-without it, duration and embedded-subtitle detection are skipped.
+The script checks for Python 3.11+, installs jsm into a private virtualenv
+(created with `--system-site-packages`, so existing Python dependencies are
+reused and nothing on your system is modified), links `jsm` into
+`~/.local/bin`, detects already-present `ffprobe`/`ffsubsync` instead of
+reinstalling them, and finishes with a health check.
+
+Prefer doing it yourself? Any of these works too:
+
+```bash
+pipx install .[sync]                  # if you use pipx
+pip install --user .[sync]            # classic user install
+python3 -m venv v && v/bin/pip install .[sync]
+```
+
+`ffprobe` (ffmpeg) is optional but recommended — without it, duration and
+embedded-subtitle detection are skipped. Check your setup any time with:
+
+```bash
+jsm doctor
+```
 
 ## Configuration
 
