@@ -12,6 +12,7 @@ from jsm.providers.opensubtitles import OpenSubtitlesProvider
 from jsm.scanner.filesystem import Scanner
 from jsm.subtitles.downloader import Downloader
 from jsm.subtitles.queue import QueueWorker, UpdateCallback
+from jsm.tools import configure_tool_paths
 
 
 class AppContext:
@@ -22,6 +23,13 @@ class AppContext:
         on_job_update: UpdateCallback | None = None,
     ):
         self.settings = settings or config.load_settings()
+        # Make configured tool locations discoverable everywhere (scanner,
+        # cleaner, synchronizer) before anything tries to find them.
+        configure_tool_paths({
+            "subscleaner": self.settings.subscleaner_path,
+            "ffsubsync": self.settings.ffsubsync_path,
+            "ffprobe": self.settings.ffprobe_path,
+        })
         self.db_path = db_path if db_path is not None else config.database_file()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.db = Database(self.db_path)

@@ -38,6 +38,11 @@ Think *Radarr/Sonarr, but for subtitles — with you in the driver's seat.*
   (`Movie.mp4 → Movie.eng.srt`). Provider filenames are never used.
 - **Automatic cleanup** — optionally run [subscleaner](https://pypi.org/project/subscleaner/)
   on downloaded subtitles to strip ads/spam lines (`--clean`, or `jsm clean`).
+  jsm feeds filenames to subscleaner on stdin (the interface its current
+  releases use) on a throwaway copy, so your originals get a `.bak` and your
+  own subscleaner database is never touched. If subscleaner lives outside
+  `$PATH` (e.g. `/opt/rogs-subscleaner/bin`), point `subscleaner_path` at it
+  in `config.toml`.
 - **Graceful under pressure** — rate limits (HTTP 429) are honored with
   back-off, server errors and network hiccups are retried, and quota
   exhaustion parks jobs instead of failing them.

@@ -152,7 +152,7 @@ async def test_clean_reports_missing_tool(tmp_path, monkeypatch):
     sub.write_bytes(SRT)
     changed, message = await cleaner.clean(sub)
     assert changed is False
-    assert "not installed" in message
+    assert "not found" in message and "subscleaner_path" in message
     assert sub.read_bytes() == SRT  # untouched
 
 
@@ -160,16 +160,21 @@ async def test_clean_rewrites_and_backs_up(tmp_path, monkeypatch):
     monkeypatch.setattr(cleaner, "subscleaner_available", lambda: True)
     sub = tmp_path / "m.eng.srt"
     sub.write_bytes(b"line with advert\nreal line\n")
+    seen = {}
 
     async def fake_exec(*args, **kwargs):
-        # subscleaner rewrites args[-1] (the temp copy) in place
-        tmp = args[-1]
+        # Modern subscleaner reads the filename from STDIN, not from argv, and
+        # edits it in place. Model that faithfully.
+        assert kwargs.get("stdin") is not None  # we must pipe input
+        seen["argv"] = args
 
         class P:
             returncode = 0
 
-            async def communicate(self):
-                open(tmp, "wb").write(b"real line\n")
+            async def communicate(self, input=None):
+                target = input.decode().strip()
+                seen["stdin"] = target
+                open(target, "wb").write(b"real line\n")
                 return b"", b""
 
         return P()
@@ -179,6 +184,40 @@ async def test_clean_rewrites_and_backs_up(tmp_path, monkeypatch):
     assert changed is True
     assert sub.read_bytes() == b"real line\n"
     assert (tmp_path / "m.eng.srt.bak").read_bytes() == b"line with advert\nreal line\n"
+    # the filename went in on stdin, and we asked for a forced, isolated run
+    assert seen["stdin"].endswith(".srt")
+    assert "--force" in seen["argv"]
+    assert "--db-location" in seen["argv"]
+
+
+async def test_clean_falls_back_when_flags_unsupported(tmp_path, monkeypatch):
+    """Older subscleaner without --force/--db-location exits 2 (argparse); we
+    must retry with a bare stdin invocation."""
+    monkeypatch.setattr(cleaner, "subscleaner_available", lambda: True)
+    sub = tmp_path / "m.eng.srt"
+    sub.write_bytes(b"advert\nreal line\n")
+    attempts = []
+
+    async def fake_exec(*args, **kwargs):
+        has_flags = "--force" in args or "--db-location" in args
+        attempts.append(has_flags)
+
+        class P:
+            returncode = 2 if has_flags else 0
+
+            async def communicate(self, input=None):
+                if self.returncode == 0:
+                    open(input.decode().strip(), "wb").write(b"real line\n")
+                    return b"", b""
+                return b"", b"error: unrecognized arguments: --force"
+
+        return P()
+
+    monkeypatch.setattr(cleaner.asyncio, "create_subprocess_exec", fake_exec)
+    changed, message = await cleaner.clean(sub)
+    assert changed is True
+    assert attempts == [True, False]  # tried flags, then fell back
+    assert sub.read_bytes() == b"real line\n"
 
 
 async def test_clean_job_action(db, scanner, tmp_path, monkeypatch, fake_provider):
