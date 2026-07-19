@@ -18,6 +18,7 @@ from jsm.providers.accounts import AccountManager
 from jsm.providers.opensubtitles import NotConfiguredError, OpenSubtitlesError, QuotaExceededError
 from jsm.subtitles import synchronizer
 from jsm.subtitles.downloader import Downloader
+from jsm.subtitles.language import normalize_language
 
 UpdateCallback = Callable[[QueueJob], None]
 
@@ -30,12 +31,14 @@ class QueueWorker:
         accounts: AccountManager,
         on_update: UpdateCallback | None = None,
         idle_poll_seconds: float = 1.0,
+        concurrency: int = 1,
     ):
         self.db = db
         self.downloader = downloader
         self.accounts = accounts
         self.on_update = on_update
         self.idle_poll_seconds = idle_poll_seconds
+        self.concurrency = max(1, concurrency)
         self._stop = asyncio.Event()
         self._wakeup = asyncio.Event()
 
@@ -49,6 +52,7 @@ class QueueWorker:
         priority: int = 0,
         min_confidence: float = 0.0,
     ) -> QueueJob:
+        language = normalize_language(language) or language
         job = self.db.enqueue(media_id, action, language, priority, min_confidence)
         self._notify(job)
         self._wakeup.set()
@@ -92,6 +96,11 @@ class QueueWorker:
 
     async def run_forever(self) -> None:
         self.db.reset_stuck_jobs()
+        async with asyncio.TaskGroup() as tg:
+            for _ in range(self.concurrency):
+                tg.create_task(self._run_loop())
+
+    async def _run_loop(self) -> None:
         while not self._stop.is_set():
             processed = await self.process_next()
             if not processed:

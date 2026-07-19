@@ -93,6 +93,9 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        # The TUI runs a second connection for threaded scans; wait out brief
+        # writer collisions instead of raising 'database is locked'.
+        self.conn.execute("PRAGMA busy_timeout=10000")
         self._migrate()
 
     def _migrate(self) -> None:
@@ -116,7 +119,7 @@ class Database:
             scan_date=row["scan_date"], status=row["status"],
         )
 
-    def upsert_media(self, media: Media) -> Media:
+    def upsert_media(self, media: Media, commit: bool = True) -> Media:
         cur = self.conn.execute(
             """INSERT INTO media (path, filename, directory, size, mtime, hash,
                                   duration, scan_date, status)
@@ -131,7 +134,8 @@ class Database:
              media.mtime, media.hash, media.duration,
              media.scan_date or _now(), media.status),
         )
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         if media.id is None:
             row = self.conn.execute(
                 "SELECT id FROM media WHERE path=?", (media.path,)
@@ -156,8 +160,11 @@ class Database:
     def media_under(self, prefix: str, status: str | None = None) -> list[Media]:
         """All media whose path lives under *prefix* (recursively)."""
         prefix = prefix.rstrip("/")
-        sql = "SELECT * FROM media WHERE (directory=? OR directory LIKE ?)"
-        params: list = [prefix, prefix + "/%"]
+        # Escape LIKE wildcards - directory names legitimately contain _ and %.
+        like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        sql = ("SELECT * FROM media WHERE (directory=? OR directory LIKE ? "
+               "ESCAPE '\\')")
+        params: list = [prefix, like + "/%"]
         if status:
             sql += " AND status=?"
             params.append(status)
@@ -173,7 +180,9 @@ class Database:
             rows = self.conn.execute("SELECT * FROM media ORDER BY path").fetchall()
         return [self._media_from_row(r) for r in rows]
 
-    def delete_media_not_in(self, directory: str, keep_paths: set[str]) -> int:
+    def delete_media_not_in(
+        self, directory: str, keep_paths: set[str], commit: bool = True
+    ) -> int:
         """Prune DB rows for files that vanished from *directory* (non-recursive)."""
         rows = self.conn.execute(
             "SELECT id, path FROM media WHERE directory=?", (directory,)
@@ -181,7 +190,7 @@ class Database:
         stale = [r["id"] for r in rows if r["path"] not in keep_paths]
         for media_id in stale:
             self.conn.execute("DELETE FROM media WHERE id=?", (media_id,))
-        if stale:
+        if stale and commit:
             self.conn.commit()
         return len(stale)
 
@@ -211,24 +220,34 @@ class Database:
             downloaded_date=row["downloaded_date"], sync_status=row["sync_status"],
         )
 
-    def replace_subtitles(self, media_id: int, subtitles: list[Subtitle]) -> None:
-        """Replace the recorded subtitle rows for one media file (scan result)."""
+    def replace_subtitles(
+        self, media_id: int, subtitles: list[Subtitle], commit: bool = True
+    ) -> None:
+        """Replace the recorded subtitle rows for one media file (scan result).
+
+        History the scanner cannot know about (sync status, download
+        provenance) is preserved by matching old rows on (path, language) -
+        NOT on source, because a rescan rediscovers a just-downloaded file as
+        a plain external subtitle.
+        """
         old = {
-            (r["path"], r["source"], r["language"]): r
+            (r["path"], r["language"]): r
             for r in self.conn.execute(
                 "SELECT * FROM subtitles WHERE media_id=?", (media_id,)
             )
         }
         self.conn.execute("DELETE FROM subtitles WHERE media_id=?", (media_id,))
         for sub in subtitles:
-            prev = old.get((sub.path, sub.source, sub.language))
+            prev = old.get((sub.path, sub.language))
             if prev is not None:
-                # keep history the scanner cannot know about
                 if sub.sync_status == SyncStatus.UNKNOWN:
                     sub.sync_status = prev["sync_status"]
                 sub.downloaded_date = sub.downloaded_date or prev["downloaded_date"]
+                if prev["source"] == "downloaded" and sub.source == "external":
+                    sub.source = "downloaded"
             self.add_subtitle(sub, commit=False)
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def add_subtitle(self, sub: Subtitle, commit: bool = True) -> Subtitle:
         cur = self.conn.execute(
@@ -248,6 +267,23 @@ class Database:
             "SELECT * FROM subtitles WHERE media_id=? ORDER BY language", (media_id,)
         ).fetchall()
         return [self._subtitle_from_row(r) for r in rows]
+
+    def subtitles_by_media(self, media_ids: list[int]) -> dict[int, list[Subtitle]]:
+        """Batch fetch: one query instead of one per media row."""
+        result: dict[int, list[Subtitle]] = {mid: [] for mid in media_ids}
+        if not media_ids:
+            return result
+        for chunk_start in range(0, len(media_ids), 500):  # SQLite var limit
+            chunk = media_ids[chunk_start:chunk_start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self.conn.execute(
+                f"SELECT * FROM subtitles WHERE media_id IN ({placeholders}) "
+                "ORDER BY language",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                result[row["media_id"]].append(self._subtitle_from_row(row))
+        return result
 
     def set_subtitle_sync_status(self, subtitle_id: int, status: str) -> None:
         self.conn.execute(
@@ -314,7 +350,17 @@ class Database:
             (media_id, action, language, *[s.value for s in ACTIVE_JOB_STATUSES]),
         ).fetchone()
         if row:
-            return self._job_from_row(row)
+            # Collapse into the existing active job, but honor the caller's
+            # newest intent for priority and confidence threshold.
+            existing = self._job_from_row(row)
+            if (existing.priority != priority
+                    or existing.min_confidence != min_confidence):
+                assert existing.id is not None
+                self.update_job(
+                    existing.id, priority=priority, min_confidence=min_confidence
+                )
+                existing = self.get_job(existing.id) or existing
+            return existing
         now = _now()
         cur = self.conn.execute(
             """INSERT INTO queue (media_id, action, language, status, priority,
@@ -363,6 +409,7 @@ class Database:
         error_message: str | None = None,
         detail: str | None = None,
         priority: int | None = None,
+        min_confidence: float | None = None,
     ) -> None:
         sets, params = ["updated=?"], [_now()]
         if status is not None:
@@ -377,6 +424,9 @@ class Database:
         if priority is not None:
             sets.append("priority=?")
             params.append(priority)
+        if min_confidence is not None:
+            sets.append("min_confidence=?")
+            params.append(min_confidence)
         params.append(job_id)
         self.conn.execute(f"UPDATE queue SET {', '.join(sets)} WHERE id=?", params)
         self.conn.commit()

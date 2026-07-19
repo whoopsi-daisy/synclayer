@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, VerticalScroll
@@ -64,7 +65,8 @@ class DashboardScreen(Screen):
             "",
             "  Wanted languages: "
             + ", ".join(language_name(l) for l in ctx.settings.languages),
-            "  Libraries: " + (", ".join(ctx.settings.libraries) or "[yellow]none configured[/yellow]"),
+            "  Libraries: " + (escape(", ".join(ctx.settings.libraries))
+                               or "[yellow]none configured[/yellow]"),
         ]
         self.query_one("#dash-library", Static).update("\n".join(library))
 
@@ -79,7 +81,8 @@ class DashboardScreen(Screen):
                 reset = time.strftime(" (resets %H:%M)", time.localtime(quota.next_reset))
             colour = "green" if quota.remaining > 5 else ("yellow" if quota.remaining else "red")
             accounts.append(
-                f"  {quota.username:<20} [{colour}]{quota.remaining:>2}/20 left[/{colour}]{reset}"
+                f"  {escape(quota.username):<20} "
+                f"[{colour}]{quota.remaining:>2}/20 left[/{colour}]{reset}"
             )
         self.query_one("#dash-accounts", Static).update("\n".join(accounts))
 

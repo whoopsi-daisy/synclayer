@@ -30,7 +30,8 @@ class AppContext:
         self.provider = OpenSubtitlesProvider(self.settings.api_key, self.accounts)
         self.downloader = Downloader(self.db, self.provider, self.scanner, self.settings)
         self.worker = QueueWorker(self.db, self.downloader, self.accounts,
-                                  on_update=on_job_update)
+                                  on_update=on_job_update,
+                                  concurrency=self.settings.queue_concurrency)
 
     def new_scanner(self) -> tuple[Database, Scanner]:
         """A scanner bound to a fresh DB connection, for use in a thread."""

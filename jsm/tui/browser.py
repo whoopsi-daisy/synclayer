@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rich.markup import escape
 from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
@@ -146,8 +147,9 @@ class BrowserScreen(Screen):
             media = [m for m in media if m.status == status]
         return media
 
-    def _subtitle_summary(self, media: Media) -> str:
-        subs = self.app.ctx.db.subtitles_for(media.id)
+    def _subtitle_summary(self, media: Media, subs=None) -> str:
+        if subs is None:
+            subs = self.app.ctx.db.subtitles_for(media.id)
         if not subs:
             return "-"
         parts = []
@@ -174,17 +176,26 @@ class BrowserScreen(Screen):
         cursor = table.cursor_row
         table.clear()
         self._media_cache.clear()
-        for media in self._visible_media():
+        visible = self._visible_media()
+        subs_map = self.app.ctx.db.subtitles_by_media(
+            [m.id for m in visible if m.id is not None]
+        )
+        for media in visible:
             assert media.id is not None
             self._media_cache[media.id] = media
             table.add_row(
                 "●" if media.id in self.selected else "",
-                media.filename,
+                # Text() renders literally - filenames like "[Group] Movie.mkv"
+                # must not be parsed as Rich markup.
+                Text(media.filename),
                 STATUS_DISPLAY.get(media.status, Text(media.status)),
-                self._subtitle_summary(media),
+                Text(self._subtitle_summary(media, subs_map.get(media.id))),
                 self._human_size(media.size),
                 key=str(media.id),
             )
+        # A filter change can hide selected rows; drop them so the shown
+        # selection count always matches what actions will operate on.
+        self.selected &= set(self._media_cache)
         if table.row_count:
             table.move_cursor(row=min(cursor, table.row_count - 1))
         self._update_status_bar()
@@ -194,7 +205,7 @@ class BrowserScreen(Screen):
             return
         n = len(self._media_cache)
         parts = [
-            f"[b]{self.current_dir}[/b]",
+            f"[b]{escape(self.current_dir)}[/b]",
             f"{n} file(s)",
             f"filter: [b]{self.filter_name}[/b]",
         ]
@@ -208,11 +219,16 @@ class BrowserScreen(Screen):
 
     @work(thread=True, exclusive=True, group="scan")
     def _scan_directory(self, directory: str) -> None:
-        db, scanner = self.app.ctx.new_scanner()
+        from jsm.scanner.filesystem import ScanStats
+
         try:
-            stats = scanner.scan(directory, recursive=False)
-        finally:
-            db.close()
+            db, scanner = self.app.ctx.new_scanner()
+            try:
+                stats = scanner.scan(directory, recursive=False)
+            finally:
+                db.close()
+        except Exception as exc:  # a failed scan must not kill the worker
+            stats = ScanStats(warnings=[f"Scan failed: {exc}"])
         self.app.call_from_thread(
             self.post_message, ScanFinished(directory, stats)
         )
@@ -221,7 +237,7 @@ class BrowserScreen(Screen):
         if event.directory == self.current_dir:
             self.refresh_table()
         for warning in event.stats.warnings:
-            self.notify(warning, severity="warning", timeout=6)
+            self.notify(escape(warning), severity="warning", timeout=6)
 
     def action_rescan(self) -> None:
         if self.current_dir:
@@ -338,16 +354,17 @@ class BrowserScreen(Screen):
 
     @work(exclusive=False, group="manual")
     async def _manual_download(self, media: Media, search: ManualSearch) -> None:
-        self.notify(f"Manual search: {search.query}…")
+        self.notify(f"Manual search: {escape(search.query)}…")
         try:
             outcome = await self.app.ctx.downloader.download_for(
                 media, search.language, query=search.query, year=search.year
             )
         except Exception as exc:
-            self.notify(f"Manual search failed: {exc}", severity="error", timeout=8)
+            self.notify(f"Manual search failed: {escape(str(exc))}",
+                        severity="error", timeout=8)
             return
         self.notify(
-            outcome.message,
+            escape(outcome.message),
             severity="information" if outcome.success else "warning",
             timeout=8,
         )
@@ -425,7 +442,8 @@ class BrowserScreen(Screen):
                     STATUS_DISPLAY.get(refreshed.status, Text(refreshed.status)),
                 )
                 table.update_cell(
-                    str(media_id), self._columns[3], self._subtitle_summary(refreshed)
+                    str(media_id), self._columns[3],
+                    Text(self._subtitle_summary(refreshed)),
                 )
             except Exception:
                 self.refresh_table()

@@ -19,8 +19,9 @@ from jsm.database.models import Media, MediaStatus, Subtitle, SyncStatus
 from jsm.scanner import ffprobe
 from jsm.subtitles.language import normalize_language, parse_subtitle_filename
 
+from jsm.subtitles.fileops import SUBTITLE_EXTENSIONS
+
 MEDIA_EXTENSIONS = {".mkv", ".mp4", ".avi", ".webm"}
-SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".vtt"}
 
 
 @dataclass
@@ -32,24 +33,22 @@ class ScanStats:
     directories: int = 0
     warnings: list[str] = field(default_factory=list)
 
-    def merge(self, other: "ScanStats") -> None:
-        self.scanned += other.scanned
-        self.added += other.added
-        self.changed += other.changed
-        self.removed += other.removed
-        self.directories += other.directories
-        self.warnings.extend(other.warnings)
-
 
 def compute_status(subtitles: list[Subtitle], wanted_languages: list[str]) -> str:
     """Derive the health status of a media file from its known subtitles.
 
-    A subtitle with unknown language (plain ``movie.srt``) is assumed to be in
-    the user's primary language and therefore counts as matching.
+    An *external* subtitle with unknown language (plain ``movie.srt``) is
+    assumed to be in the user's primary language and counts as matching.
+    Embedded streams without a language tag do NOT count - an untagged stream
+    could be any language, so the file still needs a real wanted-language sub.
     """
     wanted = {normalize_language(lang) for lang in wanted_languages}
     wanted.discard(None)
-    matching = [s for s in subtitles if s.language in wanted or s.language in ("und", None)]
+    matching = [
+        s for s in subtitles
+        if s.language in wanted
+        or (s.language in ("und", None) and s.source == "external")
+    ]
     if matching:
         bad = (SyncStatus.UNSYNCED, SyncStatus.SYNC_FAILED)
         if all(s.sync_status in bad for s in matching):
@@ -83,7 +82,9 @@ class Scanner:
         if not path.exists():
             return media
         siblings = self._subtitle_files_in(path.parent)
-        return self._process_media(path, path.stat(), siblings, ScanStats())
+        media = self._process_media(path, path.stat(), siblings, ScanStats())
+        self.db.conn.commit()
+        return media
 
     # ----------------------------------------------------------------- internal
 
@@ -118,12 +119,20 @@ class Scanner:
                 stat = entry.stat()
             except OSError as exc:
                 stats.warnings.append(f"Cannot stat {entry.path}: {exc}")
+                # A transient stat failure (flaky NFS/SMB) must not delete the
+                # file's database history - treat it as still present.
+                seen_paths.add(entry.path)
                 continue
             self._process_media(Path(entry.path), stat, sub_files, stats)
             seen_paths.add(entry.path)
             stats.scanned += 1
 
-        stats.removed += self.db.delete_media_not_in(str(directory), seen_paths)
+        stats.removed += self.db.delete_media_not_in(
+            str(directory), seen_paths, commit=False
+        )
+        # _process_media defers commits; flush the whole directory in one go
+        # instead of ~2 fsyncs per file.
+        self.db.conn.commit()
 
         if recursive:
             for subdir in sorted(subdirs):
@@ -196,11 +205,11 @@ class Scanner:
         external = self._match_external_subtitles(path, sub_files)
         subs = external + embedded
         media.status = compute_status(subs, self.wanted_languages)
-        media = self.db.upsert_media(media)
+        media = self.db.upsert_media(media, commit=False)
         assert media.id is not None
         for sub in subs:
             sub.media_id = media.id
-        self.db.replace_subtitles(media.id, subs)
+        self.db.replace_subtitles(media.id, subs, commit=False)
         return media
 
     @staticmethod
@@ -213,7 +222,7 @@ class Scanner:
             sub_stem = sub.stem
             if not (sub_stem == stem or sub_stem.startswith(stem + ".")):
                 continue
-            language, forced, hi = parse_subtitle_filename(sub)
+            language, forced, hi = parse_subtitle_filename(sub, media_stem=stem)
             matched.append(
                 Subtitle(
                     id=None, media_id=0, language=language or "und",

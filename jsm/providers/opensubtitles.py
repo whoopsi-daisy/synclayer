@@ -171,12 +171,20 @@ class OpenSubtitlesProvider(SubtitleProvider):
                 "lines to accounts.conf"
             )
         async with self._lock:
-            username = self.accounts.pick_best()
-            if username is None:
-                raise QuotaExceededError("All accounts have exhausted their quota")
-            content = await self._download_as(username, candidate)
-            self.accounts.record_download(username)
-            return content
+            while True:
+                username = self.accounts.pick_best()
+                if username is None:
+                    raise QuotaExceededError("All accounts have exhausted their quota")
+                try:
+                    content = await self._download_as(username, candidate)
+                except QuotaExceededError:
+                    # Server-side quota disagrees with local tracking (e.g.
+                    # downloads made elsewhere). Sync local state and rotate to
+                    # the next account instead of retrying this one forever.
+                    self.accounts.mark_exhausted(username)
+                    continue
+                self.accounts.record_download(username)
+                return content
 
     async def _download_as(
         self, username: str, candidate: SubtitleCandidate, retry: bool = True

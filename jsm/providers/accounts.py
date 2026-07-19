@@ -68,6 +68,17 @@ class AccountManager:
     def record_download(self, username: str, when: float | None = None) -> None:
         self.db.record_account_download(username, when)
 
+    def mark_exhausted(self, username: str, now: float | None = None) -> None:
+        """Zero out an account's local quota after the server rejected it.
+
+        Local tracking can lag reality (downloads made from another machine or
+        session). Recording synthetic timestamps keeps rotation and the
+        waiting-quota requeue logic honest instead of retrying in a loop.
+        """
+        now = time.time() if now is None else now
+        for _ in range(self.quota(username, now).remaining):
+            self.db.record_account_download(username, now)
+
     def next_available_time(self, now: float | None = None) -> float | None:
         """Earliest moment any account regains quota. None if quota is
         available right now or there are no accounts at all."""

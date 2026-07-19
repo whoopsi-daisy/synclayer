@@ -11,7 +11,7 @@ from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
-from jsm.database.models import JobStatus, QueueJob
+from jsm.database.models import ACTIVE_JOB_STATUSES, JobStatus, QueueJob
 from jsm.tui.messages import JobUpdated
 
 STATUS_STYLE = {
@@ -61,11 +61,7 @@ class QueueScreen(Screen):
             table.add_row(*self._row_cells(job), key=str(job.id))
         if table.row_count:
             table.move_cursor(row=min(cursor, table.row_count - 1))
-        active = sum(
-            1 for j in jobs
-            if j.status in (JobStatus.QUEUED, JobStatus.SEARCHING,
-                            JobStatus.DOWNLOADING, JobStatus.SYNCING)
-        )
+        active = sum(1 for j in jobs if j.status in ACTIVE_JOB_STATUSES)
         self.query_one("#queue-status", Static).update(
             f"[b]Queue[/b]  •  {len(jobs)} job(s), {active} active"
         )
@@ -75,12 +71,15 @@ class QueueScreen(Screen):
         info = job.error_message if job.status == JobStatus.FAILED else (job.detail or "")
         return [
             str(job.id),
-            Path(job.media_path or "?").name,
+            # Text() renders literally: filenames and error messages often
+            # contain brackets ('[Group] Movie', '[Errno 2] ...') that must
+            # not be parsed as Rich markup.
+            Text(Path(job.media_path or "?").name),
             job.action.replace("_", "+"),
             job.language,
             Text(job.status, style=STATUS_STYLE.get(JobStatus(job.status), "")),
             str(job.priority),
-            info or "",
+            Text(info or ""),
         ]
 
     def _cursor_job_id(self) -> int | None:

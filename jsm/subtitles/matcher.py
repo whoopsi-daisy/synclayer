@@ -9,16 +9,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 from guessit import guessit
 
 from jsm.providers.base import SubtitleCandidate
+from jsm.subtitles.language import normalize_language
 
 HASH_CONFIDENCE = 0.99
 NAME_CONFIDENCE_CAP = 0.95
 
 
-@dataclass
+@dataclass(frozen=True)
 class MediaGuess:
     title: str | None = None
     year: int | None = None
@@ -27,6 +29,9 @@ class MediaGuess:
     video_codec: str | None = None
 
 
+# guessit is expensive (tens of ms per parse) and the same names recur across
+# searches and candidates - cache aggressively.
+@lru_cache(maxsize=4096)
 def guess_media(filename: str) -> MediaGuess:
     try:
         info = guessit(filename)
@@ -89,6 +94,10 @@ def rank_candidates(
     language: str | None = None,
 ) -> list[SubtitleCandidate]:
     """Score, filter by language, and sort best-first (confidence, downloads)."""
+    # Candidates carry normalized ISO-639-1 codes; normalize the wanted side
+    # too so config values like "eng"/"english" still match.
+    if language:
+        language = normalize_language(language) or language
     guess = guess_media(media_filename)
     ranked: list[SubtitleCandidate] = []
     for candidate in candidates:

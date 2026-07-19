@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
@@ -54,9 +54,9 @@ class DetailsScreen(ModalScreen):
             return "File no longer in database."
         guess = guess_media(media.filename)
         lines = [
-            f"[b]{media.filename}[/b]",
+            f"[b]{escape(media.filename)}[/b]",
             "",
-            f"  Path       {media.path}",
+            f"  Path       {escape(media.path)}",
             f"  Status     {STATUS_LABEL.get(media.status, media.status)}",
             f"  Size       {media.size / 1e9:.2f} GB" if media.size > 1e9
             else f"  Size       {media.size / 1e6:.1f} MB",
@@ -69,9 +69,9 @@ class DetailsScreen(ModalScreen):
         lines += [
             "",
             "[b]Parsed from filename[/b] (fallback matching)",
-            f"  Title      {guess.title or '-'}",
+            f"  Title      {escape(guess.title) if guess.title else '-'}",
             f"  Year       {guess.year or '-'}",
-            f"  Group      {guess.release_group or '-'}",
+            f"  Group      {escape(guess.release_group) if guess.release_group else '-'}",
             f"  Quality    {' '.join(filter(None, [guess.screen_size, guess.video_codec])) or '-'}",
             "",
             "[b]Subtitles[/b]",
@@ -86,7 +86,7 @@ class DetailsScreen(ModalScreen):
             if sub.hearing_impaired:
                 flags.append("SDH")
             flag_text = f" [{', '.join(flags)}]" if flags else ""
-            location = Path(sub.path).name if sub.path else "[dim]embedded stream[/dim]"
+            location = escape(Path(sub.path).name) if sub.path else "[dim]embedded stream[/dim]"
             lines.append(
                 f"  {language_name(sub.language):<12} {sub.source:<10} "
                 f"{SYNC_LABEL.get(SyncStatus(sub.sync_status), sub.sync_status)}"

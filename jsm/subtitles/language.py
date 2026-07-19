@@ -86,22 +86,34 @@ def language_name(code: str) -> str:
     return _NAMES.get(two or "", code)
 
 
-SUBTITLE_FLAG_TOKENS = {"forced", "sdh", "hi", "cc", "default"}
+UNKNOWN_LANGUAGE = "und"
 
 
-def parse_subtitle_filename(sub_path: str | Path) -> tuple[str | None, bool, bool]:
+def parse_subtitle_filename(
+    sub_path: str | Path, media_stem: str | None = None
+) -> tuple[str | None, bool, bool]:
     """Parse ``movie.en.forced.srt``-style names.
 
-    Returns (language | None, forced, hearing_impaired) from the dotted tokens
-    between the media stem and the extension.
+    Returns (language | None, forced, hearing_impaired). When *media_stem* is
+    given, only the tokens AFTER the media stem are inspected, so titles that
+    contain language words ("The.Italian.Job.srt") are not misread.
     """
     stem = Path(sub_path).stem  # strips .srt
+    if media_stem is not None:
+        if stem == media_stem:
+            return None, False, False
+        if stem.startswith(media_stem + "."):
+            stem = stem[len(media_stem) + 1:]
     tokens = [t.lower() for t in stem.split(".")]
     language: str | None = None
     forced = False
     hi = False
-    # Look at trailing tokens only - the title itself may contain dots.
-    for token in reversed(tokens[-3:] if len(tokens) > 1 else []):
+    if media_stem is not None:
+        candidates = tokens  # only suffix tokens remain - all are fair game
+    else:
+        # Look at trailing tokens only - the title itself may contain dots.
+        candidates = tokens[-3:] if len(tokens) > 1 else []
+    for token in reversed(candidates):
         if token == "forced":
             forced = True
         elif token in ("sdh", "hi", "cc"):

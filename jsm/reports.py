@@ -14,10 +14,13 @@ def missing_report(db: Database, statuses: list[str] | None = None) -> list[dict
     statuses = statuses or [MediaStatus.MISSING, MediaStatus.WRONG_LANG,
                             MediaStatus.UNSYNCED]
     rows: list[dict] = []
-    for status in statuses:
-        for media in db.all_media(status=status):
+    media_by_status = [(s, db.all_media(status=s)) for s in statuses]
+    all_ids = [m.id for _, ms in media_by_status for m in ms if m.id is not None]
+    subs_map = db.subtitles_by_media(all_ids)
+    for status, media_list in media_by_status:
+        for media in media_list:
             assert media.id is not None
-            langs = sorted({s.language for s in db.subtitles_for(media.id)})
+            langs = sorted({s.language for s in subs_map.get(media.id, [])})
             rows.append(
                 {
                     "path": media.path,

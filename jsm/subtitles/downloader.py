@@ -6,6 +6,7 @@ writes go through :mod:`jsm.subtitles.fileops`.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from jsm.providers.base import SubtitleCandidate, SubtitleProvider
 from jsm.scanner.filesystem import Scanner
 from jsm.scanner.moviehash import compute_moviehash
 from jsm.subtitles.fileops import next_free_path, safe_write_subtitle, subtitle_destination
+from jsm.subtitles.language import normalize_language
 from jsm.subtitles.matcher import guess_media, rank_candidates
 
 
@@ -47,11 +49,13 @@ class Downloader:
         self.scanner = scanner
         self.settings = settings
 
-    def ensure_hash(self, media: Media) -> str | None:
+    async def ensure_hash(self, media: Media) -> str | None:
         if media.hash:
             return media.hash
         try:
-            hash_ = compute_moviehash(media.path)
+            # 128 KiB of file I/O - keep it off the event loop (slow NAS reads
+            # would otherwise stall the TUI for every queued file).
+            hash_ = await asyncio.to_thread(compute_moviehash, media.path)
         except OSError:
             return None
         if hash_ and media.id is not None:
@@ -70,7 +74,7 @@ class Downloader:
 
         *query*/*year* override the guessit-derived title/year (manual search).
         """
-        moviehash = self.ensure_hash(media)
+        moviehash = await self.ensure_hash(media)
         guess = guess_media(media.filename)
         candidates = await self.provider.search(
             languages=[language],
@@ -91,6 +95,7 @@ class Downloader:
         year: int | None = None,
     ) -> DownloadOutcome:
         assert media.id is not None
+        language = normalize_language(language) or language
         best = await self.find_best(media, language, query=query, year=year)
         if best is None:
             return DownloadOutcome(

@@ -159,6 +159,18 @@ def _language(ctx: AppContext, override: str | None) -> str:
     return ctx.settings.languages[0] if ctx.settings.languages else "en"
 
 
+async def _in_one_loop(ctx: AppContext, coro) -> object:
+    """Run *coro* and close the provider's HTTP client in the SAME event loop.
+
+    The lazily-created httpx client binds to the loop it was created on;
+    closing it later from main()'s final asyncio.run would target a dead loop.
+    """
+    try:
+        return await coro
+    finally:
+        await ctx.provider.close()
+
+
 def cmd_download(ctx: AppContext, args: argparse.Namespace) -> int:
     if not args.all and not args.paths:
         print("Give paths or use --all.", file=sys.stderr)
@@ -181,9 +193,9 @@ def cmd_download(ctx: AppContext, args: argparse.Namespace) -> int:
             print("Nothing to do.")
             return 0
     sync = args.sync or ctx.settings.sync_by_default
-    failures = asyncio.run(
-        _run_downloads(ctx, media, language, sync, args.dry_run, min_confidence)
-    )
+    failures = asyncio.run(_in_one_loop(
+        ctx, _run_downloads(ctx, media, language, sync, args.dry_run, min_confidence)
+    ))
     return 1 if failures else 0
 
 
@@ -198,7 +210,7 @@ def cmd_sync(ctx: AppContext, args: argparse.Namespace) -> int:
         assert m.id is not None
         job = ctx.worker.enqueue(m.id, JobAction.SYNC, language)
         job_ids.add(job.id)
-    asyncio.run(ctx.worker.run_until_empty())
+    asyncio.run(_in_one_loop(ctx, ctx.worker.run_until_empty()))
     failures = 0
     for job in ctx.db.jobs():
         if job.id not in job_ids:
@@ -224,9 +236,9 @@ def cmd_maintain(ctx: AppContext, args: argparse.Namespace) -> int:
     if not _confirm_bulk(len(media), args.yes, args.dry_run):
         return 1
     sync = args.sync or ctx.settings.sync_by_default
-    failures = asyncio.run(
-        _run_downloads(ctx, media, _language(ctx, None), sync, args.dry_run, min_confidence)
-    )
+    failures = asyncio.run(_in_one_loop(
+        ctx, _run_downloads(ctx, media, _language(ctx, None), sync, args.dry_run, min_confidence)
+    ))
     return 1 if failures else 0
 
 
