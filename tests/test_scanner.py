@@ -80,3 +80,69 @@ def test_unknown_language_sub_counts_as_ok(db, scanner, media_tree):
     scanner.scan(media_tree)
     media = db.get_media_by_path(str(movies / "Winnie The Pooh (2011).mkv"))
     assert media.status == MediaStatus.OK
+
+
+def test_progress_reports_total_and_current(db, scanner, media_tree):
+    calls = []
+
+    def on_progress(stats, path):
+        calls.append((stats.processed, stats.total, stats.remaining, stats.current))
+
+    scanner.scan(media_tree, on_progress=on_progress)
+    assert len(calls) == 4
+    assert all(total == 4 for (_, total, _, _) in calls)
+    processed = [p for (p, _, _, _) in calls]
+    assert processed == [1, 2, 3, 4]
+    assert calls[-1][2] == 0  # nothing remaining at the end
+    assert calls[0][3].endswith(".mkv")
+
+
+def test_non_utf8_filename_skipped_not_crash(db, scanner, media_tree):
+    import os
+
+    bad = os.fsdecode(b"Bad \xe9 Movie.mkv")  # surrogate-escaped, not UTF-8
+    (media_tree / "new-movies" / bad).write_bytes(b"x" * 1000)
+    stats = scanner.scan(media_tree)
+    assert stats.scanned == 4
+    assert stats.skipped == 1
+    assert any("non-UTF-8" in w for w in stats.warnings)
+
+
+def test_non_utf8_directory_skipped_not_crash(db, scanner, media_tree):
+    import os
+
+    bad_dir = media_tree / os.fsdecode(b"Bad \xe9 Dir")
+    bad_dir.mkdir()
+    (bad_dir / "Movie.mkv").write_bytes(b"x" * 1000)
+    stats = scanner.scan(media_tree)
+    assert stats.scanned == 4
+    assert stats.skipped == 1
+    assert any("non-UTF-8" in w for w in stats.warnings)
+
+
+def test_one_bad_file_does_not_abort_scan(db, scanner, media_tree, monkeypatch):
+    from jsm.scanner.filesystem import Scanner as S
+
+    original = S._process_media
+    target = str(media_tree / "new-movies" / "Alien (1979).mkv")
+
+    def flaky(self, path, *args, **kwargs):
+        if str(path) == target:
+            raise RuntimeError("boom")
+        return original(self, path, *args, **kwargs)
+
+    monkeypatch.setattr(S, "_process_media", flaky)
+    stats = scanner.scan(media_tree)
+    assert stats.scanned == 3
+    assert stats.skipped == 1
+    assert any("boom" in w for w in stats.warnings)
+
+
+def test_warning_cap(db, scanner):
+    from jsm.scanner.filesystem import ScanStats
+
+    stats = ScanStats()
+    for i in range(200):
+        stats.warn(f"warning {i}")
+    assert len(stats.warnings) == ScanStats.MAX_WARNINGS + 1
+    assert "suppressed" in stats.warnings[-1]

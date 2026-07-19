@@ -134,29 +134,50 @@ def cmd_doctor(ctx: AppContext) -> int:
 
 
 def _scan_paths(ctx: AppContext, paths: list[str]) -> None:
+    import shutil
+    import time
+
     roots = [Path(p) for p in paths] if paths else ctx.settings.library_paths
     if not roots:
         print("No libraries configured and no paths given. "
               f"Edit {config.config_file()} first.", file=sys.stderr)
         raise SystemExit(2)
-    # Live per-directory counter, refreshed in place on a TTY.
+    # Live progress, refreshed in place on a TTY; periodic lines otherwise.
     live = sys.stdout.isatty()
+    state = {"last": 0.0, "milestone": 0}
 
-    def on_progress(stats, directory) -> None:
+    def on_progress(stats, path) -> None:
+        done = stats.processed
         if live:
+            now = time.monotonic()
+            # Repainting the line for every file wastes more time than the
+            # scan itself on fast disks - cap redraws at ~10/s.
+            if now - state["last"] < 0.1 and done != stats.total:
+                return
+            state["last"] = now
+            width = shutil.get_terminal_size().columns
+            pct = f" ({done / stats.total:.0%})" if stats.total else ""
+            head = f"  [{done}/{stats.total}]{pct} {stats.remaining} left  "
+            name = stats.current[: max(10, width - len(head) - 2)]
             # \033[K clears to end of line so shorter updates don't leave debris.
-            print(f"\r  scanned {stats.scanned} file(s) in {stats.directories} "
-                  f"folder(s)…\033[K", end="", flush=True)
+            print(f"\r{head}{name}\033[K", end="", flush=True)
+        elif done >= state["milestone"]:
+            state["milestone"] = done + 500
+            print(f"  {done}/{stats.total} file(s) scanned…", flush=True)
 
     for root in roots:
         print(f"Scanning {root} …")
+        started = time.monotonic()
         stats = ctx.scanner.scan(root, recursive=True, on_progress=on_progress)
         if live:
             print("\r\033[K", end="")
         for warning in stats.warnings:
             print(f"  warning: {warning}", file=sys.stderr)
+        elapsed = time.monotonic() - started
+        skipped = f", {stats.skipped} skipped" if stats.skipped else ""
         print(f"  {stats.scanned} file(s) in {stats.directories} folder(s) "
-              f"({stats.added} new, {stats.changed} changed, {stats.removed} removed)")
+              f"({stats.added} new, {stats.changed} changed, "
+              f"{stats.removed} removed{skipped}) in {elapsed:.1f}s")
 
 
 def _collect_media(ctx: AppContext, paths: list[str], status: str | None = None) -> list[Media]:
@@ -434,34 +455,42 @@ def main(argv: list[str] | None = None) -> int:
 
     ctx = AppContext()
     try:
-        if args.command == "scan":
-            _scan_paths(ctx, args.paths)
-            return 0
-        if args.command == "missing":
-            if args.rescan:
-                _scan_paths(ctx, [])
-            report = format_report(missing_report(ctx.db), args.format)
-            if args.output:
-                Path(args.output).write_text(report, encoding="utf-8")
-                print(f"Report written to {args.output}")
-            else:
-                print(report, end="")
-            return 0
-        if args.command == "doctor":
-            return cmd_doctor(ctx)
-        if args.command == "accounts":
-            return cmd_accounts(ctx)
-        if args.command == "download":
-            return cmd_download(ctx, args)
-        if args.command == "sync":
-            return cmd_sync(ctx, args)
-        if args.command == "clean":
-            return cmd_clean(ctx, args)
-        if args.command == "maintain":
-            return cmd_maintain(ctx, args)
-        return 2
+        try:
+            return _dispatch(ctx, args)
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            return 130
     finally:
         asyncio.run(ctx.close())
+
+
+def _dispatch(ctx: AppContext, args: argparse.Namespace) -> int:
+    if args.command == "scan":
+        _scan_paths(ctx, args.paths)
+        return 0
+    if args.command == "missing":
+        if args.rescan:
+            _scan_paths(ctx, [])
+        report = format_report(missing_report(ctx.db), args.format)
+        if args.output:
+            Path(args.output).write_text(report, encoding="utf-8")
+            print(f"Report written to {args.output}")
+        else:
+            print(report, end="")
+        return 0
+    if args.command == "doctor":
+        return cmd_doctor(ctx)
+    if args.command == "accounts":
+        return cmd_accounts(ctx)
+    if args.command == "download":
+        return cmd_download(ctx, args)
+    if args.command == "sync":
+        return cmd_sync(ctx, args)
+    if args.command == "clean":
+        return cmd_clean(ctx, args)
+    if args.command == "maintain":
+        return cmd_maintain(ctx, args)
+    return 2
 
 
 if __name__ == "__main__":
