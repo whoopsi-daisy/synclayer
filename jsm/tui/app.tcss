@@ -108,9 +108,33 @@ BulkConfirmDialog, ManualSearchDialog, DetailsScreen, JobResultsDialog {
 }
 
 /* Menu + editors */
-OptionsMenu, FileEditScreen, ThemeScreen {
+OptionsMenu, FileEditScreen, ThemeScreen, ConfigFormScreen {
     align: center middle;
     background: $background 60%;
+}
+
+#configform-dialog {
+    width: 90;
+    max-width: 95%;
+    height: 90%;
+}
+
+#configform-body {
+    height: 1fr;
+    margin: 1 0;
+}
+
+#configform-body Label {
+    margin-top: 1;
+}
+
+#cf-libraries {
+    height: 5;
+}
+
+#cf-error {
+    height: auto;
+    color: $error;
 }
 
 #menu-dialog, #theme-dialog {

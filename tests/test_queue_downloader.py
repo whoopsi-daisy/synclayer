@@ -125,8 +125,10 @@ async def test_sync_picks_up_manually_added_subtitle(db, media_tree, worker, mon
     by a sync job (the DB alone would not know about it)."""
     synced = {}
 
-    async def fake_sync(media_path, subtitle_path):
+    async def fake_sync(media_path, subtitle_path, on_progress=None):
         synced["target"] = str(subtitle_path)
+        if on_progress:
+            on_progress("Extracting speech segments...")
         return True, "Synced"
 
     monkeypatch.setattr("jsm.subtitles.queue.synchronizer.synchronize", fake_sync)

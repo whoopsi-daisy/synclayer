@@ -85,3 +85,30 @@ def test_bulk_dry_run_needs_no_confirmation(media_tree, capsys, monkeypatch):
     out = capsys.readouterr().out
     assert rc == 1
     assert "accounts.conf" in out
+
+
+def test_logs_command_shows_path_and_tail(media_tree, capsys):
+    from jsm.config.settings import log_file
+
+    write_config(media_tree)
+    # A run writes the session header to the log file.
+    cli.main(["scan"])
+    assert log_file().exists()
+    capsys.readouterr()  # drop the scan output
+
+    assert cli.main(["logs", "--path"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out == str(log_file())
+
+    assert cli.main(["logs", "-n", "50"]) == 0
+    out = capsys.readouterr().out
+    assert "Synclayer" in out and "starting" in out
+
+
+def test_logs_command_without_log_yet(tmp_path, monkeypatch, capsys):
+    # Point at an empty home so no log exists.
+    monkeypatch.setenv("SYNCLAYER_HOME", str(tmp_path / "empty"))
+    monkeypatch.delenv("JSM_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("JSM_DATA_DIR", raising=False)
+    assert cli.main(["logs"]) == 0
+    assert "no log yet" in capsys.readouterr().out

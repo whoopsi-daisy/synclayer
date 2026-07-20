@@ -25,6 +25,7 @@ class AppContext:
     ):
         self.settings = settings or config.load_settings()
         self.activity = ActivityLog()
+        self.activity.attach_file(config.log_file())
         self._apply_tool_paths()
         self.db_path = db_path if db_path is not None else config.database_file()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -38,6 +39,34 @@ class AppContext:
                                   concurrency=self.settings.queue_concurrency,
                                   clean_downloads=self.settings.clean_by_default,
                                   activity=self.activity)
+        self._log_session_start()
+
+    def _log_session_start(self) -> None:
+        """A verbose header so a shared log carries the context to diagnose it."""
+        import platform
+
+        from jsm import __version__
+        from jsm.scanner.ffprobe import ffprobe_available
+        from jsm.subtitles.cleaner import subscleaner_available
+        from jsm.subtitles.synchronizer import ffsubsync_available
+
+        a = self.activity
+        a.trace("=" * 70)
+        a.info(f"Synclayer {__version__} starting (Python {platform.python_version()}, "
+               f"{platform.system()} {platform.release()})")
+        a.trace(f"base dir : {config.base_dir()}")
+        a.trace(f"config   : {config.config_file()}")
+        a.trace(f"database : {self.db_path}")
+        a.trace(f"log file : {config.log_file()}")
+        a.trace(f"libraries: {self.settings.libraries or '(none configured)'}")
+        a.trace(f"languages: {self.settings.languages}")
+        a.trace(f"accounts : {self.accounts.usernames}")
+        a.trace(f"api key  : {'built-in default' if self.provider.uses_default_key else ('set' if self.provider.has_api_key else 'MISSING')}")
+        a.trace(f"tools    : ffprobe={ffprobe_available()} "
+                f"ffsubsync={ffsubsync_available()} subscleaner={subscleaner_available()}")
+        a.trace(f"defaults : sync={self.settings.sync_by_default} "
+                f"clean={self.settings.clean_by_default} "
+                f"bulk_min_confidence={self.settings.bulk_min_confidence}")
 
     def _apply_tool_paths(self) -> None:
         # Make configured tool locations discoverable everywhere (scanner,
@@ -80,3 +109,5 @@ class AppContext:
     async def close(self) -> None:
         await self.provider.close()
         self.db.close()
+        self.activity.info("Synclayer stopping")
+        self.activity.close()

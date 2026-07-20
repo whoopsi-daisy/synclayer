@@ -90,7 +90,21 @@ jsm doctor
 
 ## Configuration
 
-First run creates `~/.config/jellyfin-subtitle-manager/`:
+Everything lives in **one folder**, `~/.synclayer/` by default (override with
+`SYNCLAYER_HOME`) — config, credentials, database and logs together, so the
+whole state is trivial to find, back up, or hand over when reporting a bug:
+
+```
+~/.synclayer/
+├── config.toml          # settings (edit in-app: Menu → Edit configuration)
+├── accounts.conf        # username;password lines (chmod 600)
+├── jsm.db               # scan/queue database
+└── logs/synclayer.log   # persistent, verbose log (see `jsm logs`)
+```
+
+You rarely edit these by hand — the TUI menu (**Ctrl+O**) has a structured
+**configuration form** and a **credentials editor** that validate, save, and
+reload live. First run creates the folder with commented templates:
 
 - **`accounts.conf`** — the primary credential. One `username;password` per
   line (file is chmod 600; no credentials ship with the app):
@@ -195,6 +209,7 @@ jsm
 jsm scan                          # scan configured libraries (live progress)
 jsm accounts                      # validate OpenSubtitles logins + show quota
 jsm doctor                        # check environment and configuration
+jsm logs                          # show the persistent log (path + recent lines)
 jsm missing --format csv -o report.csv
 jsm download /media/new-movies    # primary language, clean + sync by default
 jsm download /media/movies --both # every configured language (en + sv)
