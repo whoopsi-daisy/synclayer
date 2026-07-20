@@ -2,8 +2,23 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.app import App
 from textual.binding import Binding
+
+
+def _load_css() -> str:
+    """Read the stylesheet next to this module.
+
+    Loading the CSS content directly (rather than via Textual's ``CSS_PATH``
+    file lookup) means a packaging hiccup degrades to an unstyled-but-running
+    app instead of a hard ``StylesheetError`` crash at startup.
+    """
+    try:
+        return (Path(__file__).parent / "app.tcss").read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 from jsm.config import settings as config
 from jsm.core import AppContext
@@ -28,7 +43,7 @@ class JsmApp(App):
     TITLE = "Synclayer"
     # No subtitle: keep the header compact so the media table gets the space.
     SUB_TITLE = ""
-    CSS_PATH = "app.tcss"
+    CSS = _load_css()
     # The generic command palette is replaced by our own Menu (Ctrl+O), which
     # offers config/credentials/theme directly - so hide it from the footer.
     ENABLE_COMMAND_PALETTE = False

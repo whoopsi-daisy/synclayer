@@ -27,6 +27,12 @@ jsm = "jsm.main:main"
 [tool.setuptools.packages.find]
 include = ["jsm*"]
 
+# Ship non-Python resources (the Textual stylesheet) inside the package, so a
+# plain `pip install .` into site-packages includes them - otherwise the TUI
+# crashes at startup unable to read app.tcss.
+[tool.setuptools.package-data]
+jsm = ["tui/*.tcss"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
