@@ -212,11 +212,16 @@ class QueueWorker:
             self._update(job, status=JobStatus.WAITING_QUOTA, detail=detail)
             self.activity.warn(f"{_name(job)} parked: {detail}")
         except (NotConfiguredError, OpenSubtitlesError, OSError) as exc:
+            # Expected, self-explanatory failures: a clear line is enough, but
+            # keep the traceback in the file for deeper diagnosis.
             self._update(job, status=JobStatus.FAILED, error_message=str(exc))
-            self.activity.error(f"{_name(job)} failed: {exc}")
+            self.activity.exception(f"{_name(job)} failed: {exc}", exc)
         except Exception as exc:  # never let one bad job kill the worker
-            self._update(job, status=JobStatus.FAILED, error_message=f"{type(exc).__name__}: {exc}")
-            self.activity.error(f"{_name(job)} failed: {type(exc).__name__}: {exc}")
+            self._update(job, status=JobStatus.FAILED,
+                         error_message=f"{type(exc).__name__}: {exc}")
+            self.activity.exception(
+                f"{_name(job)} failed unexpectedly: {type(exc).__name__}: {exc}", exc
+            )
 
     def _sync_target(self, job: QueueJob, media=None) -> str | None:
         # The database only knows what the last scan saw. A subtitle the user
@@ -254,8 +259,17 @@ class QueueWorker:
         self, job: QueueJob, media_path: str, subtitle_path: str, fail_job: bool = False
     ) -> None:
         name = Path(subtitle_path).name
-        self._update(job, status=JobStatus.SYNCING, detail=f"Syncing {name}")
-        ok, message = await synchronizer.synchronize(media_path, subtitle_path)
+        self._update(job, status=JobStatus.SYNCING, detail=f"Syncing {name}…")
+
+        def on_progress(line: str) -> None:
+            # Every line goes to the verbose file log; the queue's live detail
+            # shows the latest so the user sees ffsubsync actually working.
+            self.activity.trace(f"ffsubsync[{name}]: {line}")
+            self._update(job, detail=f"Syncing {name}: {line[:80]}")
+
+        ok, message = await synchronizer.synchronize(
+            media_path, subtitle_path, on_progress=on_progress
+        )
         status = SyncStatus.SYNCED if ok else SyncStatus.SYNC_FAILED
         for sub in self.db.subtitles_for(job.media_id):
             if sub.path == subtitle_path and sub.id is not None:

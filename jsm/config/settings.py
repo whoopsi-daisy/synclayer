@@ -124,20 +124,29 @@ class Settings:
         return [Path(p).expanduser() for p in self.libraries]
 
 
+def base_dir() -> Path:
+    """The single Synclayer home holding config, accounts, database and logs.
+
+    Everything lives in one folder (default ``~/.synclayer``) so the whole
+    state is easy to find, back up, and hand over when reporting a problem.
+    Override the whole thing with ``SYNCLAYER_HOME``. The legacy split
+    ``JSM_CONFIG_DIR`` / ``JSM_DATA_DIR`` overrides are still honored (tests and
+    existing installs rely on them) and can even point elsewhere individually.
+    """
+    override = os.environ.get("SYNCLAYER_HOME") or os.environ.get("JSM_HOME")
+    if override:
+        return Path(override).expanduser()
+    return Path("~/.synclayer").expanduser()
+
+
 def config_dir() -> Path:
     override = os.environ.get("JSM_CONFIG_DIR")
-    if override:
-        return Path(override)
-    xdg = os.environ.get("XDG_CONFIG_HOME", "~/.config")
-    return Path(xdg).expanduser() / APP_DIR_NAME
+    return Path(override).expanduser() if override else base_dir()
 
 
 def data_dir() -> Path:
     override = os.environ.get("JSM_DATA_DIR")
-    if override:
-        return Path(override)
-    xdg = os.environ.get("XDG_DATA_HOME", "~/.local/share")
-    return Path(xdg).expanduser() / APP_DIR_NAME
+    return Path(override).expanduser() if override else base_dir()
 
 
 def config_file() -> Path:
@@ -154,6 +163,10 @@ def database_file() -> Path:
 
 def log_dir() -> Path:
     return data_dir() / "logs"
+
+
+def log_file() -> Path:
+    return log_dir() / "synclayer.log"
 
 
 def ensure_first_run_files() -> None:
@@ -187,6 +200,61 @@ def load_settings() -> Settings:
         raw = {}
     known = {f for f in Settings.__dataclass_fields__}
     return Settings(**{k: v for k, v in raw.items() if k in known})
+
+
+def _toml_str(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _toml_list(values: list[str]) -> str:
+    return "[" + ", ".join(_toml_str(v) for v in values) + "]"
+
+
+def dump_config(settings: Settings) -> str:
+    """Serialize Settings back to a commented config.toml (used by the in-app
+    configuration form). Regenerates the file from known fields - hand-written
+    comments outside these keys are not preserved, which is the trade-off for a
+    safe, machine-editable form."""
+    return f"""\
+# Synclayer / Jellyfin Subtitle Manager configuration.
+# Managed by the in-app configuration form (Menu -> Edit configuration).
+
+# Root folders of your media libraries.
+libraries = {_toml_list(settings.libraries)}
+
+# Subtitle languages you want, in priority order (ISO 639-1). The FIRST entry
+# is your primary/default language; extra entries are fetched only with "both".
+languages = {_toml_list(settings.languages)}
+
+# OpenSubtitles application API key. Leave empty to use the built-in default
+# key (free to create at https://www.opensubtitles.com/en/consumers).
+api_key = {_toml_str(settings.api_key)}
+
+# Run ffsubsync on every download by default (download -> clean -> sync).
+sync_by_default = {str(settings.sync_by_default).lower()}
+
+# Run subscleaner on each downloaded subtitle to strip ads/spam lines.
+clean_by_default = {str(settings.clean_by_default).lower()}
+
+# Minimum match confidence for bulk ("download all") operations. 0.99 = hash
+# matches only.
+bulk_min_confidence = {settings.bulk_min_confidence}
+
+# How many download jobs may run concurrently.
+queue_concurrency = {settings.queue_concurrency}
+
+# Paths to optional external tools when they are not on $PATH. Empty = auto.
+subscleaner_path = {_toml_str(settings.subscleaner_path)}
+ffsubsync_path = {_toml_str(settings.ffsubsync_path)}
+ffprobe_path = {_toml_str(settings.ffprobe_path)}
+"""
+
+
+def save_settings(settings: Settings) -> None:
+    """Write *settings* to config.toml (creating the folder if needed)."""
+    ensure_first_run_files()
+    config_file().write_text(dump_config(settings), encoding="utf-8")
 
 
 def load_accounts() -> list[tuple[str, str]]:

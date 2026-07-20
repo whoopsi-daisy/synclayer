@@ -190,21 +190,44 @@ async def test_edit_credentials_saves_and_reloads(app, tmp_path):
         assert not isinstance(app.screen, FileEditScreen)  # dialog closed
 
 
-async def test_edit_config_rejects_invalid_toml(app):
-    from jsm.tui.options import FileEditScreen
+async def test_config_form_saves_and_reloads(app, tmp_path):
+    from jsm.tui.options import ConfigFormScreen
+    from textual.widgets import Checkbox, Input
 
-    async with app.run_test(size=(120, 40)) as pilot:
+    async with app.run_test(size=(120, 48)) as pilot:
         await pilot.pause(0.4)
         app.run_menu_action("config")
         await pilot.pause(0.3)
-        editor = app.screen
-        assert isinstance(editor, FileEditScreen)
-        editor.query_one("#edit-area").text = "definitely = not [valid toml"
-        editor.action_save()
+        form = app.screen
+        assert isinstance(form, ConfigFormScreen)
+        form.query_one("#cf-languages", Input).value = "de, en"
+        form.query_one("#cf-sync", Checkbox).value = False
+        form.action_save()
+        await pilot.pause(0.4)
+        # Applied to the running context and persisted to disk.
+        assert app.ctx.settings.languages == ["de", "en"]
+        assert app.ctx.settings.sync_by_default is False
+        from jsm.config.settings import load_settings
+        assert load_settings().languages == ["de", "en"]
+        assert not isinstance(app.screen, ConfigFormScreen)
+
+
+async def test_config_form_rejects_bad_numbers(app):
+    from jsm.tui.options import ConfigFormScreen
+    from textual.widgets import Input
+
+    async with app.run_test(size=(120, 48)) as pilot:
+        await pilot.pause(0.4)
+        app.run_menu_action("config")
         await pilot.pause(0.3)
-        # Save is refused and the editor stays open with an error shown.
-        assert app.screen is editor
-        assert "TOML" in str(editor.query_one("#edit-error").render())
+        form = app.screen
+        assert isinstance(form, ConfigFormScreen)
+        # type="number" filters input, so set an out-of-band bad value directly.
+        form.query_one("#cf-confidence", Input).value = "not-a-number"
+        form.action_save()
+        await pilot.pause(0.3)
+        assert app.screen is form  # stayed open
+        assert "number" in str(form.query_one("#cf-error").render()).lower()
 
 
 async def test_bulk_dialog_requires_typed_phrase(app, media_tree):

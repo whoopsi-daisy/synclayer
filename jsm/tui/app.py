@@ -76,14 +76,10 @@ class JsmApp(App):
         self.push_screen(OptionsMenu())
 
     def run_menu_action(self, key: str) -> None:
-        from jsm.tui.options import FileEditScreen, ThemeScreen
+        from jsm.tui.options import ConfigFormScreen, FileEditScreen, ThemeScreen
 
         if key == "config":
-            self.push_screen(FileEditScreen(
-                config.config_file(), "Edit configuration", is_toml=True,
-                help_text="Library paths, languages, api_key, tool paths. "
-                          "Saved changes reload immediately.",
-            ))
+            self.push_screen(ConfigFormScreen(self.ctx.settings))
         elif key == "credentials":
             self.push_screen(FileEditScreen(
                 config.accounts_file(), "Edit accounts / credentials",

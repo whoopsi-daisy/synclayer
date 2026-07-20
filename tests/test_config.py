@@ -80,3 +80,43 @@ def test_settings_survive_broken_config():
     config_file().write_text("this is [not toml")
     settings = load_settings()
     assert settings.languages == ["en", "sv"]
+
+
+def test_unified_base_dir(monkeypatch, tmp_path):
+    from jsm.config.settings import base_dir, config_dir, data_dir, log_file
+
+    monkeypatch.delenv("JSM_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("JSM_DATA_DIR", raising=False)
+    monkeypatch.setenv("SYNCLAYER_HOME", str(tmp_path / "syn"))
+    # Everything resolves inside the one folder.
+    assert base_dir() == tmp_path / "syn"
+    assert config_dir() == tmp_path / "syn"
+    assert data_dir() == tmp_path / "syn"
+    assert log_file() == tmp_path / "syn" / "logs" / "synclayer.log"
+
+
+def test_dump_config_roundtrips():
+    from jsm.config.settings import Settings, dump_config, save_settings
+
+    original = Settings(
+        libraries=["/media/movies", "/media/tv"],
+        languages=["de", "en"],
+        api_key="key with \"quotes\" and \\slash",
+        sync_by_default=False,
+        clean_by_default=True,
+        bulk_min_confidence=0.9,
+        queue_concurrency=3,
+        subscleaner_path="/opt/x/subscleaner",
+    )
+    save_settings(original)
+    reloaded = load_settings()
+    assert reloaded.libraries == original.libraries
+    assert reloaded.languages == ["de", "en"]
+    assert reloaded.api_key == original.api_key           # escaping survived
+    assert reloaded.sync_by_default is False
+    assert reloaded.bulk_min_confidence == 0.9
+    assert reloaded.queue_concurrency == 3
+    assert reloaded.subscleaner_path == "/opt/x/subscleaner"
+    # Output is valid TOML.
+    import tomllib
+    tomllib.loads(dump_config(original))

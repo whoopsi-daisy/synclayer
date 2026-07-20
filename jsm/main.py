@@ -235,6 +235,28 @@ def _parser() -> argparse.ArgumentParser:
     maintain.add_argument("--yes", action="store_true",
                           help=f"skip the typed '{BULK_CONFIRM_PHRASE}' confirmation")
 
+    logs = sub.add_parser(
+        "logs",
+        help="show the log file path and recent entries",
+        formatter_class=fmt,
+        description=(
+            "Print the path to the persistent log file and its most recent\n"
+            "lines. The log lives in the Synclayer folder and survives across\n"
+            "runs - it captures every search/download/clean/sync plus verbose\n"
+            "diagnostics and full tracebacks. Share it when reporting a problem."
+        ),
+        epilog=(
+            "examples:\n"
+            "  jsm logs                 last 40 lines\n"
+            "  jsm logs -n 200          last 200 lines\n"
+            "  jsm logs --path          just print the file path"
+        ),
+    )
+    logs.add_argument("--lines", "-n", type=int, default=40,
+                      help="how many trailing lines to show (default: 40)")
+    logs.add_argument("--path", action="store_true",
+                      help="print only the log file path and exit")
+
     sub.add_parser(
         "accounts",
         help="verify OpenSubtitles logins and show remaining quota",
@@ -273,8 +295,10 @@ def cmd_doctor(ctx: AppContext) -> int:
         return ok or not fatal
 
     print(f"Synclayer doctor (Python {platform.python_version()})")
+    print(f"  folder: {config.base_dir()}")
     print(f"  config: {config.config_file()}")
     print(f"  data:   {ctx.db_path}")
+    print(f"  logs:   {config.log_file()}")
     healthy = True
     healthy &= line(bool(ctx.settings.libraries),
                     f"libraries configured: {', '.join(ctx.settings.libraries)}",
@@ -325,6 +349,28 @@ def cmd_doctor(ctx: AppContext) -> int:
     print("Everything needed for downloads is in place."
           if healthy else "Fix the ERR lines above, then re-run 'jsm doctor'.")
     return 0 if healthy else 1
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    """Show the persistent log file path and its recent lines."""
+    path = config.log_file()
+    if args.path:
+        print(path)
+        return 0
+    print(f"Log file: {path}")
+    if not path.exists():
+        print("  (no log yet - run a command or the TUI first)")
+        return 0
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        print(f"  could not read log: {exc}", file=sys.stderr)
+        return 1
+    tail = lines[-args.lines:] if args.lines > 0 else lines
+    print(f"--- last {len(tail)} of {len(lines)} line(s) ---")
+    for line in tail:
+        print(line)
+    return 0
 
 
 def _scan_paths(ctx: AppContext, paths: list[str]) -> None:
@@ -653,6 +699,10 @@ def main(argv: list[str] | None = None) -> int:
 
         run_tui()
         return 0
+
+    # 'logs' just reads a file - no need to spin up the whole context.
+    if args.command == "logs":
+        return cmd_logs(args)
 
     ctx = AppContext()
     try:
