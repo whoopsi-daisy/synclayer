@@ -65,6 +65,13 @@ def test_bulk_download_aborts_without_confirmation(media_tree, capsys, monkeypat
 
 
 def test_bulk_dry_run_needs_no_confirmation(media_tree, capsys, monkeypatch):
+    # Strip the shipped defaults so this exercises the unconfigured path
+    # deterministically (and never touches the real network).
+    import jsm.config.settings as settings_mod
+    import jsm.providers.opensubtitles as os_mod
+
+    monkeypatch.setattr(settings_mod, "DEFAULT_ACCOUNTS", [])
+    monkeypatch.setattr(os_mod, "DEFAULT_API_KEY", "")
     write_config(media_tree)
     cli.main(["scan"])
 

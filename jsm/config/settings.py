@@ -17,6 +17,14 @@ from pathlib import Path
 
 APP_DIR_NAME = "jellyfin-subtitle-manager"
 
+# Built-in default OpenSubtitles account(s), shipped so the app works out of
+# the box (paired with DEFAULT_API_KEY in the provider). Users add their own
+# in accounts.conf on top of these - each extra account is a separate 20/day
+# quota. Empty this list to ship without a default account.
+DEFAULT_ACCOUNTS: list[tuple[str, str]] = [
+    ("GLpwwwwwee", "HErg34444##ee"),
+]
+
 ACCOUNTS_TEMPLATE = """\
 # OpenSubtitles.com accounts, one per line, in the form:
 #
@@ -26,9 +34,14 @@ ACCOUNTS_TEMPLATE = """\
 # accounts and jsm automatically rotates to whichever has the most remaining
 # quota. Lines starting with '#' and blank lines are ignored.
 #
-# NOTE: the OpenSubtitles API also needs an application API key. If this
-# build of jsm ships without a built-in one, set api_key in config.toml
-# (free at opensubtitles.com/en/consumers) - 'jsm doctor' will tell you.
+# This build may already ship with a built-in default account (shared by
+# everyone using it, so its 20/day quota is shared too). ANYTHING you add
+# here is used IN ADDITION and gives you your own private quota - recommended
+# if you download a lot. 'jsm accounts' lists every account in effect.
+#
+# NOTE: the OpenSubtitles API also needs an application API key. This build
+# may ship a built-in one; otherwise set api_key in config.toml (free at
+# opensubtitles.com/en/consumers). 'jsm doctor' tells you what is in place.
 #
 # Example:
 #   myuser;mypassword
@@ -177,12 +190,14 @@ def load_settings() -> Settings:
 
 
 def load_accounts() -> list[tuple[str, str]]:
-    """Parse accounts.conf into (username, password) pairs."""
+    """(username, password) pairs: the built-in default(s) first, then any the
+    user added in accounts.conf. Deduplicated by username so a user can shadow
+    a default by re-declaring it, and so nothing is doubled."""
+    pairs: list[tuple[str, str]] = list(DEFAULT_ACCOUNTS)
     try:
         text = accounts_file().read_text(encoding="utf-8")
     except OSError:
-        return []
-    pairs: list[tuple[str, str]] = []
+        text = ""
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or ";" not in line:
@@ -191,4 +206,9 @@ def load_accounts() -> list[tuple[str, str]]:
         username, password = username.strip(), password.strip()
         if username and password:
             pairs.append((username, password))
-    return pairs
+    # Later entries win (user overrides a shipped default with the same name),
+    # while preserving first-seen order.
+    seen: dict[str, str] = {}
+    for username, password in pairs:
+        seen[username] = password
+    return list(seen.items())
