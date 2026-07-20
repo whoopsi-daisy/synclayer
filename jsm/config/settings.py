@@ -71,6 +71,17 @@ bulk_min_confidence = 0.99
 
 # How many download jobs may run concurrently.
 queue_concurrency = 1
+
+# Paths to the optional external tools, for when they are NOT on your $PATH
+# (e.g. a self-contained install under /opt). Leave empty to auto-detect on
+# $PATH and in jsm's virtualenv. Each may point at the binary itself or at the
+# directory containing it. 'jsm doctor' shows what was found.
+#   subscleaner_path = "/opt/rogs-subscleaner/bin/subscleaner"
+#   ffsubsync_path   = "/opt/ffsubsync/bin/ffsubsync"
+#   ffprobe_path     = "/usr/local/bin/ffprobe"
+subscleaner_path = ""
+ffsubsync_path = ""
+ffprobe_path = ""
 """
 
 
@@ -82,6 +93,9 @@ class Settings:
     sync_by_default: bool = True
     clean_by_default: bool = True
     bulk_min_confidence: float = 0.99
+    subscleaner_path: str = ""
+    ffsubsync_path: str = ""
+    ffprobe_path: str = ""
 
     @property
     def primary_language(self) -> str:

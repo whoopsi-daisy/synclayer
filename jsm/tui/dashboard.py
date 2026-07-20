@@ -98,11 +98,14 @@ class DashboardScreen(Screen):
                        f"{len(ctx.accounts.usernames)} account(s) for login/rotation",
                        "no accounts in accounts.conf - downloads disabled"),
             "  " + mark(ffprobe_available(), "ffprobe available",
-                       "ffprobe missing - no duration/embedded-subtitle detection"),
+                       "ffprobe missing - no duration/embedded detection "
+                       "(set ffprobe_path in config.toml if installed)"),
             "  " + mark(ffsubsync_available(), "ffsubsync available",
-                       "ffsubsync missing - sync actions disabled"),
+                       "ffsubsync missing - sync disabled "
+                       "(set ffsubsync_path in config.toml if installed)"),
             "  " + mark(subscleaner_available(), "subscleaner available",
-                       "subscleaner missing - cleanup disabled"),
+                       "subscleaner missing - cleanup disabled "
+                       "(set subscleaner_path in config.toml if installed)"),
             "  " + mark(ctx.provider.has_api_key,
                        "API key available"
                        + (" (built-in)" if ctx.provider.uses_default_key

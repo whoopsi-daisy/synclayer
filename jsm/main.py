@@ -298,16 +298,27 @@ def cmd_doctor(ctx: AppContext) -> int:
                     "build has no built-in key; set api_key in config.toml "
                     "(free at https://www.opensubtitles.com/en/consumers)",
                     fatal=True)
-    line(ffprobe_available(), "ffprobe found (media analysis enabled)",
-         "ffprobe not found - install ffmpeg for duration/embedded-subtitle "
-         "detection (optional)")
-    line(ffsubsync_available(), "ffsubsync found (subtitle sync enabled)",
-         "ffsubsync not found - sync actions disabled "
-         "(pip install 'jellyfin-subtitle-manager[sync]', optional)")
+    def found_at(resolver, tool):
+        from jsm.tools import resolve_tool
+        path = resolve_tool(tool)
+        return f" [{path}]" if path else ""
+
+    line(ffprobe_available(), f"ffprobe found{found_at(ffprobe_available, 'ffprobe')} "
+         "(media analysis enabled)",
+         "ffprobe not found - install ffmpeg, or set ffprobe_path in "
+         "config.toml, for duration/embedded-subtitle detection (optional)")
+    line(ffsubsync_available(), f"ffsubsync found{found_at(ffsubsync_available, 'ffsubsync')} "
+         "(subtitle sync enabled)",
+         "ffsubsync not found - sync actions disabled (pip install "
+         "'jellyfin-subtitle-manager[sync]', or set ffsubsync_path in "
+         "config.toml)")
     from jsm.subtitles.cleaner import subscleaner_available
 
-    line(subscleaner_available(), "subscleaner found (subtitle cleanup enabled)",
-         "subscleaner not found - cleanup disabled (pip install subscleaner, optional)")
+    line(subscleaner_available(),
+         f"subscleaner found{found_at(subscleaner_available, 'subscleaner')} "
+         "(subtitle cleanup enabled)",
+         "subscleaner not found - cleanup disabled (pip install subscleaner, "
+         "or set subscleaner_path in config.toml)")
     stats = ctx.db.media_stats()
     print(f"  info  database has {stats.get('total', 0)} media file(s) "
           f"({stats.get('missing', 0)} missing subtitles)")
@@ -509,8 +520,9 @@ def cmd_clean(ctx: AppContext, args: argparse.Namespace) -> int:
     from jsm.subtitles.cleaner import subscleaner_available
 
     if not subscleaner_available():
-        print("subscleaner is not installed. Install it with: pip install subscleaner",
-              file=sys.stderr)
+        print("subscleaner not found. Install it (pip install subscleaner) or, "
+              "if it lives outside your $PATH, set subscleaner_path in "
+              f"{config.config_file()}", file=sys.stderr)
         return 2
     language = normalize_language(_language(ctx, args.language)) or _language(ctx, args.language)
     media = _collect_media(ctx, args.paths)
