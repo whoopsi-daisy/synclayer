@@ -22,7 +22,11 @@ APP_DIR_NAME = "jellyfin-subtitle-manager"
 # in accounts.conf on top of these - each extra account is a separate 20/day
 # quota. Empty this list to ship without a default account.
 DEFAULT_ACCOUNTS: list[tuple[str, str]] = [
-    ("GLpwwwwwee", "HErg34444##ee"),
+    ("qiqizangusa", "Y@U]rW3QF-R]+iV"),
+    ("fqopp1", "Fwqlpwq333"),
+    ("jaloooo3", "Whgergg4444"),
+    ("jennnyyy66662", "Weg34h34h4rrr"),
+    ("helllyyy3332", "Wheer4g43g443"),
 ]
 
 ACCOUNTS_TEMPLATE = """\
