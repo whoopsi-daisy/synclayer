@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from textual.message import Message
 
+from jsm.activity import LogEntry
 from jsm.database.models import QueueJob
 from jsm.scanner.filesystem import ScanStats
+
+
+class ActivityLogged(Message):
+    """A new line was appended to the shared activity log."""
+
+    def __init__(self, entry: LogEntry):
+        super().__init__()
+        self.entry = entry
 
 
 class JobUpdated(Message):

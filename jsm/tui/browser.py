@@ -16,12 +16,13 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static, Tree
+from textual.widgets import DataTable, Footer, Static, Tree
 from textual.widgets.tree import TreeNode
 
 from jsm.database.models import JobAction, Media, MediaStatus
 from jsm.subtitles.language import language_name
 from jsm.tui.dialogs import BulkChoice, BulkConfirmDialog, ManualSearch, ManualSearchDialog
+from jsm.tui.header import MenuHeader
 from jsm.tui.messages import JobUpdated, ScanFinished
 
 STATUS_DISPLAY: dict[str, Text] = {
@@ -73,22 +74,25 @@ class LibraryTree(Tree[str]):
 
 class BrowserScreen(Screen):
     BINDINGS = [
-        Binding("space", "toggle_select", "Select"),
-        Binding("ctrl+a", "select_all", "Select all"),
-        Binding("escape", "clear_selection", "Clear sel", show=False),
-        Binding("f", "filter('missing')", "Missing"),
-        Binding("l", "filter('wrong language')", "Wrong lang"),
-        Binding("u", "filter('unsynced')", "Unsynced"),
-        Binding("a", "filter('all')", "All"),
+        # Selection.
+        Binding("space", "toggle_select", "Tag file"),
+        Binding("ctrl+a", "select_all", "Tag all", show=False),
+        Binding("escape", "clear_selection", "Untag all", show=False),
+        # Filters (which rows are shown).
+        Binding("f", "filter('missing')", "Show missing"),
+        Binding("a", "filter('all')", "Show all"),
+        Binding("l", "filter('wrong language')", "Show wrong-lang", show=False),
+        Binding("u", "filter('unsynced')", "Show unsynced", show=False),
         Binding("h", "toggle_hide_ok", "Hide done"),
-        Binding("d", "download_sync", "Download"),
-        Binding("g", "download_all_langs", "Get both langs"),
-        Binding("o", "download_only", "Download (no sync)"),
-        Binding("s", "sync", "Sync"),
-        Binding("m", "manual_search", "Manual", show=False),
+        # Actions on the tagged files (or the row under the cursor).
+        Binding("d", "download_sync", "Download+sync"),
+        Binding("o", "download_only", "Download only"),
+        Binding("g", "download_all_langs", "Download both langs", show=False),
+        Binding("s", "sync", "Sync existing"),
         Binding("v", "details", "Details"),
-        Binding("r", "rescan", "Rescan"),
-        Binding("b", "bulk", "Bulk DL"),
+        Binding("m", "manual_search", "Manual search", show=False),
+        Binding("r", "rescan", "Rescan folder"),
+        Binding("b", "bulk", "Bulk download"),
     ]
 
     def __init__(self):
@@ -103,7 +107,7 @@ class BrowserScreen(Screen):
     # --------------------------------------------------------------- layout
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield MenuHeader()
         with Horizontal():
             with Vertical(id="browser-left"):
                 yield LibraryTree(self.app.ctx.settings.library_paths, id="library-tree")
@@ -261,6 +265,7 @@ class BrowserScreen(Screen):
             self.refresh_table()
         for warning in event.stats.warnings:
             self.notify(escape(warning), severity="warning", timeout=6)
+            self.app.ctx.activity.warn(f"Scan: {warning}")
 
     def action_rescan(self) -> None:
         if self.current_dir:
@@ -401,6 +406,9 @@ class BrowserScreen(Screen):
     @work(exclusive=False, group="manual")
     async def _manual_download(self, media: Media, search: ManualSearch) -> None:
         self.notify(f"Manual search: {escape(search.query)}…")
+        self.app.ctx.activity.info(
+            f"Manual search '{search.query}' ({search.language}) for {media.filename}"
+        )
         try:
             outcome = await self.app.ctx.downloader.download_for(
                 media, search.language, query=search.query, year=search.year
@@ -408,11 +416,15 @@ class BrowserScreen(Screen):
         except Exception as exc:
             self.notify(f"Manual search failed: {escape(str(exc))}",
                         severity="error", timeout=8)
+            self.app.ctx.activity.error(f"Manual search failed for {media.filename}: {exc}")
             return
         self.notify(
             escape(outcome.message),
             severity="information" if outcome.success else "warning",
             timeout=8,
+        )
+        (self.app.ctx.activity.ok if outcome.success else self.app.ctx.activity.warn)(
+            f"Manual {media.filename}: {outcome.message}"
         )
         self.refresh_table()
 

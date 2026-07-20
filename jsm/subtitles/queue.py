@@ -10,17 +10,23 @@ asyncio worker. Job lifecycle:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Awaitable, Callable
 
+from jsm.activity import ActivityLog
 from jsm.database.db import Database
 from jsm.database.models import JobAction, JobStatus, QueueJob, SyncStatus
 from jsm.providers.accounts import AccountManager
 from jsm.providers.opensubtitles import NotConfiguredError, OpenSubtitlesError, QuotaExceededError
 from jsm.subtitles import cleaner, synchronizer
 from jsm.subtitles.downloader import Downloader
-from jsm.subtitles.language import normalize_language
+from jsm.subtitles.language import language_name, normalize_language
 
 UpdateCallback = Callable[[QueueJob], None]
+
+
+def _name(job: QueueJob) -> str:
+    return Path(job.media_path or "?").name
 
 
 class QueueWorker:
@@ -33,6 +39,7 @@ class QueueWorker:
         idle_poll_seconds: float = 1.0,
         concurrency: int = 1,
         clean_downloads: bool = False,
+        activity: ActivityLog | None = None,
     ):
         self.db = db
         self.downloader = downloader
@@ -42,6 +49,8 @@ class QueueWorker:
         self.concurrency = max(1, concurrency)
         # Run subscleaner on each freshly downloaded subtitle (from config).
         self.clean_downloads = clean_downloads
+        # Optional shared activity log; a no-op sink keeps call sites simple.
+        self.activity = activity or ActivityLog()
         self._stop = asyncio.Event()
         self._wakeup = asyncio.Event()
 
@@ -143,33 +152,41 @@ class QueueWorker:
         if media is None:
             self._update(job, status=JobStatus.FAILED, error_message="Media no longer in database")
             return
+        lang = language_name(job.language)
         try:
             if job.action in (JobAction.DOWNLOAD, JobAction.DOWNLOAD_SYNC):
                 self._update(job, status=JobStatus.SEARCHING, detail="Searching…")
+                self.activity.info(f"Searching {lang} subtitle for {_name(job)}")
                 outcome = await self.downloader.download_for(
                     media, job.language, min_confidence=job.min_confidence
                 )
                 if not outcome.success:
                     self._update(job, status=JobStatus.FAILED, error_message=outcome.message)
+                    self.activity.warn(f"No subtitle for {_name(job)}: {outcome.message}")
                     return
                 self._update(job, status=JobStatus.DOWNLOADING, detail=outcome.message)
+                self.activity.ok(f"Downloaded {lang} for {_name(job)}: {outcome.message}")
                 if self.clean_downloads and outcome.subtitle_path:
                     await self._clean_file(job, outcome.subtitle_path)
                 if job.action == JobAction.DOWNLOAD_SYNC and outcome.subtitle_path:
                     await self._sync_file(job, media.path, outcome.subtitle_path)
+                elif outcome.subtitle_path:
+                    self.activity.info(
+                        f"Sync skipped for {_name(job)} (download-only)"
+                    )
                 self._update(job, status=JobStatus.COMPLETED)
             elif job.action == JobAction.SYNC:
                 target = self._sync_target(job, media)
                 if target is None:
-                    self._update(
-                        job, status=JobStatus.FAILED,
-                        error_message=(
-                            f"No external '{job.language}' subtitle file found "
-                            f"next to {media.filename} - download one first, or "
-                            "name it like the video (Movie.en.srt)"
-                        ),
+                    msg = (
+                        f"No external '{job.language}' subtitle file found "
+                        f"next to {media.filename} - download one first, or "
+                        "name it like the video (Movie.en.srt)"
                     )
+                    self._update(job, status=JobStatus.FAILED, error_message=msg)
+                    self.activity.warn(f"Sync failed for {_name(job)}: {msg}")
                     return
+                self.activity.info(f"Syncing {Path(target).name} to {_name(job)}")
                 await self._sync_file(job, media.path, target, fail_job=True)
             elif job.action == JobAction.CLEAN:
                 target = self._sync_target(job, media)
@@ -178,6 +195,7 @@ class QueueWorker:
                         job, status=JobStatus.FAILED,
                         error_message=f"No '{job.language}' subtitle to clean",
                     )
+                    self.activity.warn(f"Nothing to clean for {_name(job)}")
                     return
                 await self._clean_file(job, target)
                 self._update(job, status=JobStatus.COMPLETED)
@@ -192,10 +210,13 @@ class QueueWorker:
                 resume = datetime.datetime.fromtimestamp(when).strftime("%H:%M")
                 detail += f" - auto-resumes around {resume}"
             self._update(job, status=JobStatus.WAITING_QUOTA, detail=detail)
+            self.activity.warn(f"{_name(job)} parked: {detail}")
         except (NotConfiguredError, OpenSubtitlesError, OSError) as exc:
             self._update(job, status=JobStatus.FAILED, error_message=str(exc))
+            self.activity.error(f"{_name(job)} failed: {exc}")
         except Exception as exc:  # never let one bad job kill the worker
             self._update(job, status=JobStatus.FAILED, error_message=f"{type(exc).__name__}: {exc}")
+            self.activity.error(f"{_name(job)} failed: {type(exc).__name__}: {exc}")
 
     def _sync_target(self, job: QueueJob, media=None) -> str | None:
         # The database only knows what the last scan saw. A subtitle the user
@@ -220,14 +241,20 @@ class QueueWorker:
 
     async def _clean_file(self, job: QueueJob, subtitle_path: str) -> None:
         """Run subscleaner; a cleanup failure is never fatal to the job."""
-        self._update(job, detail=f"Cleaning {subtitle_path}")
+        self._update(job, detail=f"Cleaning {Path(subtitle_path).name}")
         changed, message = await cleaner.clean(subtitle_path)
         self._update(job, detail=message)
+        name = Path(subtitle_path).name
+        if changed:
+            self.activity.ok(f"Cleaned {name}: {message}")
+        else:
+            self.activity.info(f"Clean {name}: {message}")
 
     async def _sync_file(
         self, job: QueueJob, media_path: str, subtitle_path: str, fail_job: bool = False
     ) -> None:
-        self._update(job, status=JobStatus.SYNCING, detail=f"Syncing {subtitle_path}")
+        name = Path(subtitle_path).name
+        self._update(job, status=JobStatus.SYNCING, detail=f"Syncing {name}")
         ok, message = await synchronizer.synchronize(media_path, subtitle_path)
         status = SyncStatus.SYNCED if ok else SyncStatus.SYNC_FAILED
         for sub in self.db.subtitles_for(job.media_id):
@@ -237,11 +264,14 @@ class QueueWorker:
         if media is not None:
             self.downloader.scanner.rescan_media(media)
         if ok:
+            self.activity.ok(f"Synced {name}: {message}")
             if fail_job:  # sync-only job: completing it is our responsibility
                 self._update(job, status=JobStatus.COMPLETED, detail=message)
             else:
                 self._update(job, detail=message)
         elif fail_job:
             self._update(job, status=JobStatus.FAILED, error_message=message)
+            self.activity.error(f"Sync failed for {name}: {message}")
         else:
             self._update(job, detail=f"Downloaded, but sync failed: {message}")
+            self.activity.warn(f"Downloaded {name}, but sync failed: {message}")

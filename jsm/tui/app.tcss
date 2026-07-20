@@ -92,3 +92,57 @@ BulkConfirmDialog, ManualSearchDialog, DetailsScreen, JobResultsDialog {
     border: round $primary-darken-2;
     height: auto;
 }
+
+/* Activity log */
+#log-status {
+    height: auto;
+    padding: 0 1;
+    background: $surface;
+    color: $text-muted;
+}
+
+#activity-log {
+    height: 1fr;
+    padding: 0 1;
+    background: $background;
+}
+
+/* Menu + editors */
+OptionsMenu, FileEditScreen, ThemeScreen {
+    align: center middle;
+    background: $background 60%;
+}
+
+#menu-dialog, #theme-dialog {
+    width: 60;
+}
+
+#menu-list, #theme-list {
+    height: auto;
+    max-height: 16;
+    margin-top: 1;
+}
+
+#menu-title {
+    margin-bottom: 1;
+}
+
+#edit-dialog {
+    width: 100;
+    max-width: 95%;
+    height: 90%;
+}
+
+#edit-area {
+    height: 1fr;
+    margin: 1 0;
+}
+
+#edit-help {
+    color: $text-muted;
+}
+
+#edit-error {
+    height: auto;
+    color: $error;
+}
