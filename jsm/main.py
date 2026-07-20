@@ -309,10 +309,10 @@ def cmd_doctor(ctx: AppContext) -> int:
                         f"library path not found: {path}", fatal=True)
     accounts = ctx.accounts.usernames
     healthy &= line(bool(accounts),
-                    f"{len(accounts)} OpenSubtitles account(s) in accounts.conf "
-                    "(username/password login)",
-                    "no accounts in accounts.conf - downloads will fail "
-                    "(add 'username;password' lines)",
+                    f"{len(accounts)} OpenSubtitles account(s) available "
+                    "(built-in defaults + any in accounts.conf)",
+                    "no accounts available - downloads will fail "
+                    "(add 'username;password' lines to accounts.conf)",
                     fatal=True)
     healthy &= line(ctx.provider.has_api_key,
                     "OpenSubtitles API key available "
