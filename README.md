@@ -122,6 +122,26 @@ First run creates `~/.config/jellyfin-subtitle-manager/`:
   bulk_min_confidence = 0.99
   ```
 
+### How OpenSubtitles authentication works
+
+OpenSubtitles has three distinct secrets — they are easy to mix up:
+
+| Secret | What it identifies | Lifetime | Where it lives in jsm |
+| --- | --- | --- | --- |
+| **API key** | the *application* (jsm) | permanent | built in (`DEFAULT_API_KEY`), or `api_key` in config.toml to override |
+| **Username / password** | a *user account* (owns the 20/day quota) | permanent | built-in default account, plus your own in `accounts.conf` |
+| **API token** (a `eyJ…` JWT) | one *login session* | **expires in ~24 h** | never stored — jsm logs in and gets a fresh one automatically |
+
+The API key rides on *every* request as the `Api-Key` header (without it the
+server returns HTTP 403). jsm then logs in with a username/password to get a
+short-lived token for search and download. **Do not paste the `eyJ…` token
+anywhere** — it is the one thing that expires, and hardcoding it is the usual
+cause of "works, then downloads start failing". jsm generates it for you.
+
+Because a build can ship a default API key *and* a default account, jsm works
+with no configuration at all. Adding your own account in `accounts.conf` gives
+you a private 20/day quota instead of sharing the default one.
+
 ### Languages: primary + secondary
 
 `languages` is a priority list. The **first** entry is your primary/default

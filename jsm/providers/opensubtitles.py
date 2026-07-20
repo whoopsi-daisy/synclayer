@@ -36,7 +36,7 @@ USER_AGENT = f"synclayer-jsm v{__version__}"
 # https://www.opensubtitles.com/en/consumers and paste the key here; an
 # api_key in config.toml always overrides it. While this is empty, every
 # installation must set api_key in config.toml instead.
-DEFAULT_API_KEY = "gUCLWGoAg2PmyseoTM0INFFVPcDCeDlT"
+DEFAULT_API_KEY = "vHh6aftueIF6sHD8WsRL88t2h8FcoFOD"
 
 # Rate-limit / transient-error handling.
 MAX_RETRIES = 3
@@ -384,10 +384,16 @@ class OpenSubtitlesProvider(SubtitleProvider):
     async def _download_as(
         self, username: str, candidate: SubtitleCandidate, retry: bool = True
     ) -> bytes:
+        try:
+            file_id = int(candidate.file_id)
+        except (TypeError, ValueError):
+            raise OpenSubtitlesError(
+                f"Bad subtitle file id from search: {candidate.file_id!r}"
+            )
         token = await self._login(username)
         resp = await self._request(
             "POST", f"{self._account_base_url(username)}/download",
-            json={"file_id": int(candidate.file_id)},
+            json={"file_id": file_id},
             headers=self._headers(token),
         )
         if resp.status_code == 401 and retry:
@@ -404,11 +410,18 @@ class OpenSubtitlesProvider(SubtitleProvider):
             )
         body = resp.json()
         remaining = body.get("remaining")
-        if isinstance(remaining, int) and remaining < 0:
-            raise QuotaExceededError(f"Account '{username}' hit its download quota")
         link = body.get("link")
         if not link:
-            raise OpenSubtitlesError("Download response contained no link")
+            # OpenSubtitles returns 200 with a message (and no link) when the
+            # account is out of quota - surface the real reason so it doesn't
+            # look like a mysterious failure.
+            message = self._body_message(resp) or "no download link in response"
+            spent = isinstance(remaining, int) and remaining <= 0
+            if spent or "download" in message.lower() or "quota" in message.lower():
+                raise QuotaExceededError(f"Account '{username}': {message}")
+            raise OpenSubtitlesError(f"Download failed for '{username}': {message}")
+        if isinstance(remaining, int) and remaining < 0:
+            raise QuotaExceededError(f"Account '{username}' hit its download quota")
         file_resp = await self._request("GET", link)
         if file_resp.status_code != 200:
             raise OpenSubtitlesError(f"Fetching subtitle file failed: HTTP {file_resp.status_code}")

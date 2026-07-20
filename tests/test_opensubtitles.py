@@ -254,6 +254,36 @@ async def test_download_rotates_to_freshest_account(db):
     assert logins == ["b"]
 
 
+async def test_download_no_link_out_of_quota_is_clear(db):
+    # OpenSubtitles answers 200 with a message and no link when the account is
+    # spent - this must read as a quota problem, not a mystery failure.
+    def handler(request):
+        if request.url.path.endswith("/login"):
+            return httpx.Response(200, json={"token": "t"})
+        return httpx.Response(200, json={
+            "remaining": 0,
+            "message": "You have downloaded your allowed 20 subtitles for 24h.",
+        })
+
+    provider, _ = make_provider(db, handler)
+    candidate = SubtitleCandidate(provider="opensubtitles", file_id="1",
+                                  language="en", release_name="x")
+    # The per-account call surfaces the server's exact reason...
+    with pytest.raises(QuotaExceededError, match="20 subtitles"):
+        await provider._download_as("alice", candidate)
+    # ...and the rotating wrapper marks it spent and reports all-exhausted.
+    with pytest.raises(QuotaExceededError, match="exhausted"):
+        await provider.download(candidate)
+
+
+async def test_download_bad_file_id_is_clear(db):
+    provider, _ = make_provider(db, lambda r: httpx.Response(200, json={"token": "t"}))
+    candidate = SubtitleCandidate(provider="opensubtitles", file_id="None",
+                                  language="en", release_name="x")
+    with pytest.raises(Exception, match="file id"):
+        await provider.download(candidate)
+
+
 async def test_quota_error_on_406(db):
     def handler(request):
         if request.url.path.endswith("/login"):
