@@ -9,11 +9,12 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Static
 
 from jsm.scanner.ffprobe import ffprobe_available
 from jsm.subtitles.language import language_name
 from jsm.subtitles.synchronizer import ffsubsync_available
+from jsm.tui.header import MenuHeader
 from jsm.tui.messages import JobUpdated
 
 
@@ -21,7 +22,7 @@ class DashboardScreen(Screen):
     BINDINGS = [Binding("r", "refresh", "Refresh")]
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield MenuHeader()
         with VerticalScroll():
             with Grid(id="dashboard-grid"):
                 yield Static("", id="dash-library", classes="dash-panel")
@@ -119,17 +120,19 @@ class DashboardScreen(Screen):
         help_text = [
             "[b]Keys[/b]",
             "",
-            "  [b]1[/b] dashboard   [b]2[/b] browser   [b]3[/b] queue",
-            "  [b]Space[/b] select   [b]D[/b] download (clean+sync)   "
-            f"[b]G[/b] get both langs ({langs})",
-            "  [b]O[/b] download only (no sync)   [b]S[/b] sync   [b]V[/b] details",
-            "  [b]M[/b] manual search   [b]F/L/U/A[/b] filter missing/wrong/unsynced/all",
-            "  [b]H[/b] hide files that already have subtitles",
-            "  [b]B[/b] bulk download (typed confirmation)   [b]R[/b] rescan",
-            "  [b]Ctrl+Q[/b] quit",
+            "  [b]1[/b] dashboard  [b]2[/b] browser  [b]3[/b] queue  [b]4[/b] activity log",
+            "  [b]Ctrl+O[/b] menu (edit config / credentials / theme)  ·  [b]Ctrl+Q[/b] quit",
+            "",
+            "  [b]In the browser:[/b]",
+            "  [b]Space[/b] tag a file   [b]D[/b] download+sync   [b]O[/b] download only",
+            f"  [b]G[/b] both langs ({langs})   [b]S[/b] sync existing   [b]V[/b] details",
+            "  [b]F[/b] show missing   [b]A[/b] show all   [b]H[/b] hide files that are done",
+            "  [b]L/U[/b] show wrong-lang / unsynced   [b]M[/b] manual search",
+            "  [b]B[/b] bulk download (typed confirmation)   [b]R[/b] rescan folder",
             "",
             "  [dim]Queued work runs in the background - the status bar shows",
-            "  running/failed counts and a summary pops up when a batch ends.[/dim]",
+            "  running/failed counts, a summary pops up when a batch ends, and",
+            "  the activity log ([b]4[/b]) keeps the full history incl. sync results.[/dim]",
             "",
             f"  [dim]default per download: clean + sync · primary language {ctx.settings.primary_language}[/dim]",
         ]

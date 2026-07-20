@@ -9,9 +9,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Static
 
 from jsm.database.models import ACTIVE_JOB_STATUSES, JobStatus, QueueJob
+from jsm.tui.header import MenuHeader
 from jsm.tui.messages import JobUpdated
 
 STATUS_STYLE = {
@@ -37,7 +38,7 @@ class QueueScreen(Screen):
     ]
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield MenuHeader()
         yield Static("", id="queue-status")
         yield DataTable(id="queue-table", cursor_type="row")
         yield Footer()

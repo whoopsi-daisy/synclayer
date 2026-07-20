@@ -10,6 +10,7 @@ from jsm.core import AppContext
 from jsm.database.models import JobStatus, QueueJob
 from jsm.tui.browser import BrowserScreen
 from jsm.tui.dashboard import DashboardScreen
+from jsm.tui.logscreen import LogScreen
 from jsm.tui.messages import JobUpdated
 from jsm.tui.queue_view import QueueScreen
 
@@ -25,19 +26,26 @@ _SETTLED_STATUSES = {
 
 class JsmApp(App):
     TITLE = "Synclayer"
-    SUB_TITLE = "Jellyfin Subtitle Maintenance Manager"
+    # No subtitle: keep the header compact so the media table gets the space.
+    SUB_TITLE = ""
     CSS_PATH = "app.tcss"
+    # The generic command palette is replaced by our own Menu (Ctrl+O), which
+    # offers config/credentials/theme directly - so hide it from the footer.
+    ENABLE_COMMAND_PALETTE = False
 
     MODES = {
         "dashboard": DashboardScreen,
         "browser": BrowserScreen,
         "queue": QueueScreen,
+        "log": LogScreen,
     }
 
     BINDINGS = [
         Binding("1", "switch_mode('dashboard')", "Dashboard"),
         Binding("2", "switch_mode('browser')", "Browser"),
         Binding("3", "switch_mode('queue')", "Queue"),
+        Binding("4", "switch_mode('log')", "Log"),
+        Binding("ctrl+o", "menu", "Menu"),
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
@@ -52,9 +60,45 @@ class JsmApp(App):
         self._watched_jobs: dict[int, QueueJob] = {}
 
     def on_mount(self) -> None:
+        self.theme = "dracula"
         self.switch_mode("browser")
         self.run_worker(self.ctx.worker.run_forever(), group="queue-worker",
                         description="download queue")
+
+    # ------------------------------------------------------------------- menu
+
+    def action_menu(self) -> None:
+        from jsm.tui.options import OptionsMenu
+
+        # Avoid stacking multiple menus (e.g. header click while open).
+        if self.screen.__class__.__name__ == "OptionsMenu":
+            return
+        self.push_screen(OptionsMenu())
+
+    def run_menu_action(self, key: str) -> None:
+        from jsm.tui.options import FileEditScreen, ThemeScreen
+
+        if key == "config":
+            self.push_screen(FileEditScreen(
+                config.config_file(), "Edit configuration", is_toml=True,
+                help_text="Library paths, languages, api_key, tool paths. "
+                          "Saved changes reload immediately.",
+            ))
+        elif key == "credentials":
+            self.push_screen(FileEditScreen(
+                config.accounts_file(), "Edit accounts / credentials",
+                is_toml=False, private=True,
+                help_text="One 'username;password' per line. Added on top of "
+                          "the built-in default account (kept private, 0600).",
+            ))
+        elif key == "theme":
+            self.push_screen(ThemeScreen())
+        elif key == "log":
+            self.switch_mode("log")
+        elif key == "help":
+            self.switch_mode("dashboard")
+        elif key == "quit":
+            self.run_worker(self.action_quit())
 
     def _job_updated(self, job: QueueJob) -> None:
         # Called by the queue worker inside the same event loop.
